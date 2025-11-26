@@ -1,0 +1,15 @@
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.GeneratedMSBuildEditorConfig.editorconfig
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.AssemblyInfoInputs.cache
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.AssemblyInfo.cs
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.csproj.CoreCompileInputs.cache
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.sourcelink.json
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\UAssetBridge.exe
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\UAssetBridge.deps.json
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\UAssetBridge.runtimeconfig.json
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\UAssetBridge.dll
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\UAssetBridge.pdb
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.dll
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\refint\UAssetBridge.dll
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.pdb
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\UAssetBridge.genruntimeconfig.cache
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net9.0\win-x64\ref\UAssetBridge.dll

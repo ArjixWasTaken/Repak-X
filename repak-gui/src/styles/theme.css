@@ -1,0 +1,92 @@
+:root {
+  /* Dark theme (defaults) */
+  --bg-darkest: #141414;
+  --bg-darker: #1a1a1a;
+  --bg-dark: #202020;
+  --bg-light: #2a2a2a;
+  --bg-lighter: #323232;
+  
+  --panel-bg: var(--bg-darker);
+  --panel-border: #2a2a2a;
+  
+  --text-primary: #e6e6e6;
+  --text-secondary: #a7a7a7;
+  
+  --accent-primary: #4a9eff;
+  --accent-secondary: #3a8eef;
+  --danger: #f44336;
+  --success: #4CAF50;
+  
+  --btn-text: #ffffff;
+  --overlay: rgba(0,0,0,0.6);
+}
+
+[data-theme="light"] {
+  --bg-darkest: #ffffff;
+  --bg-darker: #f6f6f6;
+  --bg-dark: #efefef;
+  --bg-light: #e6e6e6;
+  --bg-lighter: #dddddd;
+  
+  --panel-bg: #ffffff;
+  --panel-border: #e0e0e0;
+  
+  --text-primary: #111214;
+  --text-secondary: #5a5a5a;
+  
+  --accent-primary: #4a9eff;
+  --accent-secondary: #3a8eef;
+  --danger: #d32f2f;
+  --success: #2e7d32;
+  
+  --btn-text: #111214;
+  --overlay: rgba(0,0,0,0.06);
+}
+
+/* Generic helpers used across components */
+.panel, .modal-content, .install-panel, .details-panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--panel-border);
+  color: var(--text-primary);
+  border-radius: 6px;
+}
+
+input[type="text"], .path-input, .search-input, select {
+  background: var(--bg-darkest);
+  color: var(--text-primary);
+  border: 1px solid var(--panel-border);
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.btn, button {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  padding:8px 14px;
+  border-radius:4px;
+  border:1px solid transparent;
+  cursor:pointer;
+  color:var(--btn-text);
+  background:var(--bg-light);
+}
+
+.btn-primary {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+  color: var(--btn-text);
+}
+
+.tag {
+  background: var(--bg-light);
+  color: var(--accent-primary);
+  padding:4px 8px;
+  border-radius:4px;
+  border:1px solid var(--panel-border);
+  font-size:12px;
+}
+
+.modal-overlay {
+  background: var(--overlay);
+}

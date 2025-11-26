@@ -1,0 +1,121 @@
+import React, { useState } from 'react';
+import { open } from '@tauri-apps/plugin-dialog'
+import { invoke } from '@tauri-apps/api/core'
+import './SettingsPanel.css'
+
+const ACCENT_COLORS = {
+  blue: '#4a9eff',
+  purple: '#9c27b0',
+  green: '#4CAF50',
+  orange: '#ff9800',
+  pink: '#e91e63'
+};
+
+export default function SettingsPanel({ settings, onSave, onClose, theme, setTheme, accentColor, setAccentColor }) {
+  const [globalUsmap, setGlobalUsmap] = useState(settings.globalUsmap || '');
+  const [hideSuffix, setHideSuffix] = useState(settings.hideSuffix || false);
+  const [usmapStatus, setUsmapStatus] = useState('');
+
+  const handleSave = () => {
+    onSave({
+      globalUsmap,
+      hideSuffix
+    });
+    onClose();
+  };
+
+  const handleBrowseUsmap = async () => {
+    try {
+      const selected = await open({
+        filters: [{
+          name: 'USmap Files',
+          extensions: ['usmap']
+        }],
+        title: 'Select USmap File'
+      });
+
+      if (selected) {
+        // Call backend to copy file to Usmap/ folder
+        const filename = await invoke('copy_usmap_to_folder', { sourcePath: selected });
+        setGlobalUsmap(filename);
+        setUsmapStatus(`✓ USmap file copied to Usmap folder: ${filename}`);
+      }
+    } catch (error) {
+      console.error('Failed to select USmap:', error);
+      setUsmapStatus(`✗ Error: ${error}`);
+    }
+  };
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Settings</h2>
+          <button className="modal-close" onClick={onClose}>×</button>
+        </div>
+        
+        <div className="modal-body">
+          <div className="setting-section">
+            <h3>Game Settings</h3>
+            <div className="setting-group">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={hideSuffix}
+                  onChange={(e) => setHideSuffix(e.target.checked)}
+                />
+                Hide file suffix in mod names
+              </label>
+            </div>
+            <div className="setting-group">
+              <label>Global USMAP Path:</label>
+              <input
+                type="text"
+                value={globalUsmap}
+                onChange={(e) => setGlobalUsmap(e.target.value)}
+                placeholder="Path to global USMAP file..."
+                className="path-input"
+              />
+            </div>
+          </div>
+
+          <div className="setting-section">
+            <h3>Theme</h3>
+            <select 
+              value={theme} 
+              onChange={(e) => setTheme(e.target.value)}
+              className="theme-select"
+            >
+              <option value="dark">Dark Theme</option>
+              <option value="light">Light Theme</option>
+            </select>
+          </div>
+
+          <div className="setting-section">
+            <h3>Accent Color</h3>
+            <div className="color-options">
+              {Object.entries(ACCENT_COLORS).map(([name, color]) => (
+                <button
+                  key={name}
+                  className={`color-option ${accentColor === color ? 'selected' : ''}`}
+                  style={{ backgroundColor: color }}
+                  onClick={() => setAccentColor(color)}
+                  title={name.charAt(0).toUpperCase() + name.slice(1)}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+        
+        <div className="modal-footer">
+          <button onClick={handleSave} className="btn-primary">
+            Save
+          </button>
+          <button onClick={onClose} className="btn-secondary">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

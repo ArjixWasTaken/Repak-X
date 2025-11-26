@@ -1,0 +1,6 @@
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net7.0\win-x64\UAssetBridge.csproj.AssemblyReference.cache
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net7.0\win-x64\UAssetBridge.GeneratedMSBuildEditorConfig.editorconfig
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net7.0\win-x64\UAssetBridge.AssemblyInfoInputs.cache
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net7.0\win-x64\UAssetBridge.AssemblyInfo.cs
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net7.0\win-x64\UAssetBridge.csproj.CoreCompileInputs.cache
+E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\obj\Release\net7.0\win-x64\UAssetBridge.sourcelink.json
