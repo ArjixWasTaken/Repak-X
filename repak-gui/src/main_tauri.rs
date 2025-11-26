@@ -364,7 +364,29 @@ async fn parse_dropped_files(paths: Vec<String>) -> Result<Vec<InstallableModInf
         
         // Determine mod type and auto-detection flags
         let (mod_type, auto_fix_mesh, auto_fix_texture, auto_fix_serialize_size) = if path.is_dir() {
-            ("Directory".to_string(), false, false, false)
+            use crate::utils::collect_files;
+            
+            let mut file_paths = Vec::new();
+            if let Ok(_) = collect_files(&mut file_paths, &path) {
+                let files: Vec<String> = file_paths.iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+                    
+                let mod_type = get_current_pak_characteristics(files.clone());
+                
+                use crate::uasset_detection::{detect_mesh_files, detect_texture_files, detect_static_mesh_files};
+                
+                let has_skeletal_mesh = detect_mesh_files(&files);
+                let has_static_mesh = detect_static_mesh_files(&files);
+                let has_texture = detect_texture_files(&files);
+                
+                info!("Auto-detection for directory {}: skeletal={}, static={}, texture={}", 
+                      mod_name, has_skeletal_mesh, has_static_mesh, has_texture);
+                
+                (mod_type, has_skeletal_mesh, has_texture, has_static_mesh)
+            } else {
+                ("Directory".to_string(), false, false, false)
+            }
         } else if path.extension().and_then(|s| s.to_str()) == Some("pak") {
             // Try to read PAK and determine type
             if let Ok(file) = File::open(&path) {
