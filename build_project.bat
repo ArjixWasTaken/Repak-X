@@ -10,7 +10,7 @@ cd repak-gui || (
 )
 
 echo.
-echo [1/3] Installing Frontend Dependencies...
+echo [1/2] Installing Frontend Dependencies...
 call npm install
 if %ERRORLEVEL% NEQ 0 (
     echo Error: npm install failed
@@ -19,19 +19,10 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
-echo [2/3] Building Frontend...
-call npm run build
+echo [2/2] Building Tauri App (Frontend + Backend)...
+cargo tauri build --no-bundle
 if %ERRORLEVEL% NEQ 0 (
-    echo Error: npm run build failed
-    pause
-    exit /b %ERRORLEVEL%
-)
-
-echo.
-echo [3/3] Building Rust Backend (Release)...
-cargo build --release
-if %ERRORLEVEL% NEQ 0 (
-    echo Error: cargo build failed
+    echo Error: cargo tauri build failed
     pause
     exit /b %ERRORLEVEL%
 )
@@ -39,6 +30,6 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 echo ==========================================
 echo Build Complete!
-echo Executable is located at: repak-gui\target\release\repak-gui.exe
+echo Executable is located at: target\release\repak-gui.exe
 echo ==========================================
 pause
