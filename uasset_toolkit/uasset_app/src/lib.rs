@@ -2,8 +2,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Stdio;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::Command as AsyncCommand;
+use tokio::process::{Command as AsyncCommand, Child, ChildStdin, ChildStdout};
+use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt, Lines};
+use tokio::sync::Mutex;
 
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
@@ -19,6 +20,10 @@ pub enum UAssetRequest {
     GetTextureInfo { file_path: String },
     #[serde(rename = "detect_mesh")]
     DetectMesh { file_path: String },
+    #[serde(rename = "detect_skeletal_mesh")]
+    DetectSkeletalMesh { file_path: String },
+    #[serde(rename = "detect_static_mesh")]
+    DetectStaticMesh { file_path: String },
     #[serde(rename = "patch_mesh")]
     PatchMesh { file_path: String, uexp_path: String },
     #[serde(rename = "get_mesh_info")]
@@ -48,8 +53,15 @@ pub struct MeshInfo {
     pub is_skeletal_mesh: Option<bool>,
 }
 
+struct ChildProcess {
+    _child: Child,
+    stdin: ChildStdin,
+    reader: Lines<BufReader<ChildStdout>>,
+}
+
 pub struct UAssetToolkit {
     bridge_path: String,
+    process: Mutex<Option<ChildProcess>>,
 }
 
 impl UAssetToolkit {
@@ -72,7 +84,14 @@ impl UAssetToolkit {
                     if workspace_bridge.exists() {
                         workspace_bridge.to_string_lossy().to_string()
                     } else {
-                        anyhow::bail!("UAssetBridge.exe not found. Please build the project first or provide explicit path.");
+                        // Try looking in the source tools folder as fallback for dev
+                        let dev_bridge = Path::new("tools/UAssetBridge/bin/Debug/net8.0/win-x64/UAssetBridge.exe");
+                         if dev_bridge.exists() {
+                            dev_bridge.to_string_lossy().to_string()
+                        } else {
+                             // Default assumption
+                             bridge_path.to_string_lossy().to_string()
+                        }
                     }
                 } else {
                     bridge_path.to_string_lossy().to_string()
@@ -80,43 +99,75 @@ impl UAssetToolkit {
             }
         };
 
-        if !Path::new(&bridge_path).exists() {
-            anyhow::bail!("UAssetBridge executable not found at: {}", bridge_path);
-        }
-
-        Ok(Self { bridge_path })
+        Ok(Self { 
+            bridge_path,
+            process: Mutex::new(None),
+        })
     }
 
     async fn send_request(&self, request: UAssetRequest) -> Result<UAssetResponse> {
-        let mut cmd = AsyncCommand::new(&self.bridge_path);
-        cmd.stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        
-        #[cfg(windows)]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag on Windows
-        
-        let mut child = cmd.spawn()
-            .context("Failed to spawn UAssetBridge process")?;
+        let mut process_guard = self.process.lock().await;
 
-        let stdin = child.stdin.as_mut().context("Failed to get stdin")?;
-        let request_json = serde_json::to_string(&request)?;
-        
-        stdin.write_all(request_json.as_bytes()).await?;
-        stdin.write_all(b"\n").await?;
-        drop(stdin);
+        if process_guard.is_none() {
+             if !Path::new(&self.bridge_path).exists() {
+                 anyhow::bail!("UAssetBridge executable not found at: {}", self.bridge_path);
+             }
 
-        let output = child.wait_with_output().await?;
-        
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("UAssetBridge failed: {}", stderr);
+            let mut cmd = AsyncCommand::new(&self.bridge_path);
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped());
+            
+            #[cfg(windows)]
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag on Windows
+            
+            let mut child = cmd.spawn()
+                .context("Failed to spawn UAssetBridge process")?;
+
+            let stdin = child.stdin.take().context("Failed to get stdin")?;
+            let stdout = child.stdout.take().context("Failed to get stdout")?;
+            let reader = BufReader::new(stdout).lines();
+            
+            *process_guard = Some(ChildProcess { _child: child, stdin, reader });
         }
 
-        let response_str = String::from_utf8(output.stdout)?;
-        let response: UAssetResponse = serde_json::from_str(&response_str.trim())?;
+        let proc = process_guard.as_mut().unwrap();
+        let request_json = serde_json::to_string(&request)?;
         
-        Ok(response)
+        if let Err(e) = proc.stdin.write_all(request_json.as_bytes()).await {
+            *process_guard = None;
+            anyhow::bail!("Failed to write to UAssetBridge (process likely died): {}", e);
+        }
+        
+        if let Err(e) = proc.stdin.write_all(b"\n").await {
+            *process_guard = None;
+            anyhow::bail!("Failed to write newline to UAssetBridge: {}", e);
+        }
+        
+        if let Err(e) = proc.stdin.flush().await {
+            *process_guard = None;
+            anyhow::bail!("Failed to flush to UAssetBridge: {}", e);
+        }
+
+        match proc.reader.next_line().await {
+            Ok(Some(line)) => {
+                match serde_json::from_str::<UAssetResponse>(&line) {
+                    Ok(response) => Ok(response),
+                    Err(e) => {
+                        *process_guard = None;
+                        anyhow::bail!("Failed to parse response from UAssetBridge: {} (Line: {})", e, line);
+                    }
+                }
+            },
+            Ok(None) => {
+                *process_guard = None;
+                anyhow::bail!("UAssetBridge process closed connection (EOF)");
+            },
+            Err(e) => {
+                *process_guard = None;
+                anyhow::bail!("Failed to read from UAssetBridge: {}", e);
+            }
+        }
     }
 
     /// Check if a uasset file is a texture asset
@@ -146,6 +197,40 @@ impl UAssetToolkit {
         
         if !response.success {
             anyhow::bail!("Failed to detect mesh: {}", response.message);
+        }
+        
+        Ok(response.data
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false))
+    }
+
+    /// Check if a uasset file is a skeletal mesh asset
+    pub async fn is_skeletal_mesh_uasset(&self, file_path: &str) -> Result<bool> {
+        let request = UAssetRequest::DetectSkeletalMesh {
+            file_path: file_path.to_string(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to detect skeletal mesh: {}", response.message);
+        }
+        
+        Ok(response.data
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false))
+    }
+
+    /// Check if a uasset file is a static mesh asset
+    pub async fn is_static_mesh_uasset(&self, file_path: &str) -> Result<bool> {
+        let request = UAssetRequest::DetectStaticMesh {
+            file_path: file_path.to_string(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to detect static mesh: {}", response.message);
         }
         
         Ok(response.data
@@ -293,6 +378,14 @@ impl UAssetToolkitSync {
 
     pub fn is_mesh_uasset(&self, file_path: &str) -> Result<bool> {
         self.runtime.block_on(self.toolkit.is_mesh_uasset(file_path))
+    }
+
+    pub fn is_skeletal_mesh_uasset(&self, file_path: &str) -> Result<bool> {
+        self.runtime.block_on(self.toolkit.is_skeletal_mesh_uasset(file_path))
+    }
+
+    pub fn is_static_mesh_uasset(&self, file_path: &str) -> Result<bool> {
+        self.runtime.block_on(self.toolkit.is_static_mesh_uasset(file_path))
     }
 
     pub fn set_no_mipmaps(&self, file_path: &str) -> Result<()> {

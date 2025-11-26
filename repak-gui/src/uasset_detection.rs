@@ -91,25 +91,132 @@ fn analyze_uasset_for_texture_class(path: &Path) -> Result<bool, Box<dyn std::er
     Ok(has_texture_class)
 }
 
-/// Detects SKELETAL mesh files in a list of mod contents (FAST heuristic for auto-detection)
-/// This is for "Fix Mesh" auto-enable which applies to SK_* files only
-/// Uses fast filename heuristics - actual processing will use UAssetAPI for accuracy
-pub fn detect_mesh_files(mod_contents: &[String]) -> bool {
-    mod_contents.iter().any(|file| {
-        let lower_file = file.to_lowercase();
-        
-        if lower_file.ends_with(".uasset") {
+use uasset_toolkit::{UAssetToolkit, UAssetToolkitSync};
+
+/// Detects SKELETAL mesh files in a list of mod contents using UAssetAPI (persistent process)
+/// Async version for use in Tauri commands
+pub async fn detect_mesh_files_async(mod_contents: &[String]) -> bool {
+    // Try to use UAssetToolkit with persistent process for batch scanning
+    if let Ok(toolkit) = UAssetToolkit::new(None) {
+        for file in mod_contents {
             let path = PathBuf::from(file);
-            // Use fast heuristic for auto-detection (just for convenience)
-            // Actual processing will use UAssetAPI for accuracy
+            if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+                if let Ok(true) = toolkit.is_skeletal_mesh_uasset(file).await {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Fallback to heuristic
+    mod_contents.iter().any(|file| {
+        let path = PathBuf::from(file);
+        if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
             return is_mesh_uasset_heuristic(&path);
         }
         false
     })
 }
 
-/// Detects texture files in a list of mod contents
+/// Detects texture files in a list of mod contents using UAssetAPI (persistent process)
+/// Async version for use in Tauri commands
+pub async fn detect_texture_files_async(mod_contents: &[String]) -> bool {
+    // Try to use UAssetToolkit with persistent process for batch scanning
+    if let Ok(toolkit) = UAssetToolkit::new(None) {
+        for file in mod_contents {
+            let lower_file = file.to_lowercase();
+            if lower_file.ends_with(".png") ||
+               lower_file.ends_with(".jpg") ||
+               lower_file.ends_with(".jpeg") ||
+               lower_file.ends_with(".dds") ||
+               lower_file.ends_with(".tga") {
+                return true;
+            }
+            
+            if lower_file.ends_with(".uasset") {
+                if let Ok(true) = toolkit.is_texture_uasset(file).await {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Fallback
+    detect_texture_files(mod_contents)
+}
+
+/// Detects Static Mesh files in a list of mod contents using UAssetAPI (persistent process)
+/// Async version for use in Tauri commands
+pub async fn detect_static_mesh_files_async(mod_contents: &[String]) -> bool {
+    if let Ok(toolkit) = UAssetToolkit::new(None) {
+        for file in mod_contents {
+            let path = PathBuf::from(file);
+            if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+                if let Ok(true) = toolkit.is_static_mesh_uasset(file).await {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Fallback
+    detect_static_mesh_files(mod_contents)
+}
+
+/// Detects SKELETAL mesh files in a list of mod contents using UAssetAPI (persistent process)
+/// This is for "Fix Mesh" auto-enable which applies to SK_* files only
+pub fn detect_mesh_files(mod_contents: &[String]) -> bool {
+    // Try to use UAssetToolkit with persistent process for batch scanning
+    if let Ok(toolkit) = UAssetToolkitSync::new(None) {
+        for file in mod_contents {
+            let path = PathBuf::from(file);
+            if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+                if let Ok(true) = toolkit.is_skeletal_mesh_uasset(file) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Fallback to heuristic if toolkit unavailable
+    mod_contents.iter().any(|file| {
+        let path = PathBuf::from(file);
+        if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+            return is_mesh_uasset_heuristic(&path);
+        }
+        false
+    })
+}
+
+/// Detects texture files in a list of mod contents using UAssetAPI (persistent process)
 pub fn detect_texture_files(mod_contents: &[String]) -> bool {
+    // Try to use UAssetToolkit with persistent process for batch scanning
+    if let Ok(toolkit) = UAssetToolkitSync::new(None) {
+        for file in mod_contents {
+            let lower_file = file.to_lowercase();
+            // Image file extensions
+            if lower_file.ends_with(".png") ||
+               lower_file.ends_with(".jpg") ||
+               lower_file.ends_with(".jpeg") ||
+               lower_file.ends_with(".dds") ||
+               lower_file.ends_with(".tga") {
+                return true;
+            }
+            
+            if lower_file.ends_with(".uasset") {
+                if let Ok(true) = toolkit.is_texture_uasset(file) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // Fallback to heuristic
     mod_contents.iter().any(|file| {
         let lower_file = file.to_lowercase();
         
@@ -122,16 +229,9 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
             return true;
         }
         
-        // UAsset files in texture directories
+        // UAsset files
         if lower_file.ends_with(".uasset") {
             let path = PathBuf::from(file);
-            
-            // Use UAsset Toolkit for accurate detection
-            if let Ok(is_texture) = detect_texture_with_toolkit(&path) {
-                return is_texture;
-            }
-            
-            // Fallback to heuristics
             return is_texture_uasset_heuristic(&path);
         }
         
@@ -139,27 +239,30 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
     })
 }
 
-/// Detects Static Mesh files in a list of mod contents (FAST heuristic for auto-detection)
-/// Uses fast filename pattern matching - actual processing will use UAssetAPI for accuracy
+/// Detects Static Mesh files in a list of mod contents using UAssetAPI (persistent process)
 pub fn detect_static_mesh_files(mod_contents: &[String]) -> bool {
-    mod_contents.iter().any(|file| {
-        let lower_file = file.to_lowercase();
-        
-        // Only check .uasset files
-        if lower_file.ends_with(".uasset") {
+    // Try to use UAssetToolkit with persistent process for batch scanning
+    if let Ok(toolkit) = UAssetToolkitSync::new(None) {
+        for file in mod_contents {
             let path = PathBuf::from(file);
-            
-            // Use fast filename heuristic for auto-detection (just for convenience)
-            // Actual processing will use UAssetAPI for 100% accuracy
-            if let Some(filename) = path.file_name() {
-                let filename_str = filename.to_string_lossy().to_lowercase();
-                // SM_* prefix = Static Mesh
-                // Exclude SK_* = Skeletal Mesh
-                return filename_str.starts_with("sm_") 
-                    && !filename_str.starts_with("sk_");
+            if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+                if let Ok(true) = toolkit.is_static_mesh_uasset(file) {
+                    return true;
+                }
             }
         }
-        
+        return false;
+    }
+
+    // Fallback to heuristic
+    mod_contents.iter().any(|file| {
+        let path = PathBuf::from(file);
+        if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+            if let Some(filename) = path.file_name() {
+                let filename_str = filename.to_string_lossy().to_lowercase();
+                return filename_str.starts_with("sm_") && !filename_str.starts_with("sk_");
+            }
+        }
         false
     })
 }

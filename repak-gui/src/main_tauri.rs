@@ -374,11 +374,10 @@ async fn parse_dropped_files(paths: Vec<String>) -> Result<Vec<InstallableModInf
                     
                 let mod_type = get_current_pak_characteristics(files.clone());
                 
-                use crate::uasset_detection::{detect_mesh_files, detect_texture_files, detect_static_mesh_files};
-                
-                let has_skeletal_mesh = detect_mesh_files(&files);
-                let has_static_mesh = detect_static_mesh_files(&files);
-                let has_texture = detect_texture_files(&files);
+                // Auto-detect mesh and texture files
+                let has_skeletal_mesh = detect_mesh_files_async(&files).await;
+                let has_static_mesh = detect_static_mesh_files_async(&files).await;
+                let has_texture = detect_texture_files_async(&files).await;
                 
                 info!("Auto-detection for directory {}: skeletal={}, static={}, texture={}", 
                       mod_name, has_skeletal_mesh, has_static_mesh, has_texture);
@@ -398,16 +397,9 @@ async fn parse_dropped_files(paths: Vec<String>) -> Result<Vec<InstallableModInf
                         let mod_type = get_current_pak_characteristics(files.clone());
                         
                         // Auto-detect mesh and texture files
-                        use crate::uasset_detection::{detect_mesh_files, detect_texture_files, detect_static_mesh_files};
-                        
-                        // detect_mesh_files = skeletal meshes (sk_*) -> Fix Mesh
-                        let has_skeletal_mesh = detect_mesh_files(&files);
-                        
-                        // detect_static_mesh_files = static meshes (sm_*) -> Fix SerializeSize
-                        let has_static_mesh = detect_static_mesh_files(&files);
-                        
-                        // detect_texture_files = textures -> Fix Texture
-                        let has_texture = detect_texture_files(&files);
+                        let has_skeletal_mesh = detect_mesh_files_async(&files).await;
+                        let has_static_mesh = detect_static_mesh_files_async(&files).await;
+                        let has_texture = detect_texture_files_async(&files).await;
                         
                         info!("Auto-detection for {}: skeletal={}, static={}, texture={}", 
                               mod_name, has_skeletal_mesh, has_static_mesh, has_texture);

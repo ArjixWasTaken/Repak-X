@@ -39,7 +39,8 @@ fn main() {
 
         // Workspace root: …/Repak_Gui-Revamped/repak-gui -> parent is workspace root
         let workspace_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf();
-        let tools_dir = workspace_root.join("tools").join("UAssetBridge");
+        // Update path to match actual location: uasset_toolkit/tools/UAssetBridge
+        let tools_dir = workspace_root.join("uasset_toolkit").join("tools").join("UAssetBridge");
         let fallback_release = tools_dir.join("bin").join("Release").join("net8.0").join("win-x64").join("UAssetBridge.exe");
         let fallback_debug = tools_dir.join("bin").join("Debug").join("net8.0").join("win-x64").join("UAssetBridge.exe");
 
