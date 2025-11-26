@@ -1,31 +1,16 @@
 import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
 
-export default function ModDetailsPanel({ mod, onClose, onUpdate }) {
+export default function ModDetailsPanel({ mod, onClose }) {
   const [details, setDetails] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [isEditingPriority, setIsEditingPriority] = useState(false)
-  const [newPriority, setNewPriority] = useState(0)
 
   useEffect(() => {
     if (mod) {
       loadModDetails()
-      setNewPriority(mod.priority || 0)
     }
   }, [mod])
-
-  const handlePriorityChange = async () => {
-     try {
-        await invoke('set_mod_priority', { modPath: mod.path, priority: parseInt(newPriority) })
-        setIsEditingPriority(false)
-        if (onUpdate) onUpdate()
-     } catch (err) {
-        console.error('Failed to set priority:', err)
-        setError(err.toString())
-     }
-  }
 
   const loadModDetails = async () => {
     try {
@@ -90,62 +75,6 @@ export default function ModDetailsPanel({ mod, onClose, onUpdate }) {
                   <span className="detail-value">{mod.folder_id}</span>
                 </div>
               )}
-            </div>
-
-            <div className="detail-section">
-              <h3>Settings</h3>
-              <div className="detail-item">
-                 <span className="detail-label">Load Priority:</span>
-                 <div className="detail-value" style={{display: 'flex', alignItems: 'center', gap: '0.5rem'}}>
-                    {isEditingPriority ? (
-                        <>
-                           <input 
-                             type="number" 
-                             min="0" 
-                             max="20" 
-                             value={newPriority} 
-                             onChange={(e) => setNewPriority(e.target.value)}
-                             className="priority-input"
-                             style={{width: '60px', padding: '4px', background: 'var(--bg-secondary)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '4px'}}
-                           />
-                           <button onClick={handlePriorityChange} className="btn-small" style={{background: 'var(--accent-primary)', color: 'white'}}>Save</button>
-                           <button onClick={() => setIsEditingPriority(false)} className="btn-small">Cancel</button>
-                        </>
-                    ) : (
-                        <>
-                           <span>{mod.priority || 0} (Count of 9s)</span>
-                           <button onClick={() => setIsEditingPriority(true)} className="btn-small">Edit</button>
-                        </>
-                    )}
-                 </div>
-                 <p style={{fontSize: '0.8em', color: '#888', marginTop: '4px', marginBottom: '0'}}>
-                    Higher number = Higher loading priority (more 9s in suffix)
-                 </p>
-              </div>
-              <div className="detail-item" style={{marginTop: '10px'}}>
-                 <button 
-                    onClick={async () => {
-                        try {
-                            // Use Tauri dialog to pick folder
-                            const selected = await open({
-                                directory: true,
-                                multiple: false,
-                                title: 'Select Destination Folder'
-                            });
-                            if (selected) {
-                                await invoke('extract_pak_to_destination', { modPath: mod.path, destPath: selected });
-                                alert('Extraction complete!');
-                            }
-                        } catch (e) {
-                            console.error(e);
-                            alert('Extraction failed: ' + e);
-                        }
-                    }}
-                    className="btn-small"
-                 >
-                    Extract contents...
-                 </button>
-              </div>
             </div>
             
             {mod.custom_tags && mod.custom_tags.length > 0 && (

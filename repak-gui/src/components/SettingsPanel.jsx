@@ -11,7 +11,7 @@ const ACCENT_COLORS = {
   pink: '#e91e63'
 };
 
-export default function SettingsPanel({ settings, onSave, onClose, theme, setTheme, accentColor, setAccentColor }) {
+export default function SettingsPanel({ settings, onSave, onClose, theme, setTheme, accentColor, setAccentColor, gamePath, onAutoDetectGamePath, onBrowseGamePath, isGamePathLoading }) {
   const [globalUsmap, setGlobalUsmap] = useState(settings.globalUsmap || '');
   const [hideSuffix, setHideSuffix] = useState(settings.hideSuffix || false);
   const [usmapStatus, setUsmapStatus] = useState('');
@@ -56,6 +56,28 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
         
         <div className="modal-body">
           <div className="setting-section">
+            <h3>Game Path</h3>
+            <div className="setting-group">
+              <label>Current Game Path</label>
+              <input
+                type="text"
+                value={gamePath || ''}
+                readOnly
+                placeholder="No game path set"
+                className="path-input"
+              />
+            </div>
+            <div className="setting-group" style={{ display: 'flex', gap: '0.5rem' }}>
+              <button onClick={onAutoDetectGamePath} disabled={isGamePathLoading}>
+                {isGamePathLoading ? 'Detecting…' : 'Auto Detect'}
+              </button>
+              <button onClick={onBrowseGamePath}>
+                Browse
+              </button>
+            </div>
+          </div>
+
+          <div className="setting-section">
             <h3>Game Settings</h3>
             <div className="setting-group">
               <label>
@@ -69,13 +91,28 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
             </div>
             <div className="setting-group">
               <label>Global USMAP Path:</label>
-              <input
-                type="text"
-                value={globalUsmap}
-                onChange={(e) => setGlobalUsmap(e.target.value)}
-                placeholder="Path to global USMAP file..."
-                className="path-input"
-              />
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  value={globalUsmap}
+                  onChange={(e) => setGlobalUsmap(e.target.value)}
+                  placeholder="Path to global USMAP file..."
+                  className="path-input"
+                  readOnly
+                />
+                <button onClick={handleBrowseUsmap}>
+                  Browse
+                </button>
+              </div>
+              {usmapStatus && (
+                <p style={{ 
+                  fontSize: '0.85rem', 
+                  marginTop: '0.5rem',
+                  color: usmapStatus.startsWith('✓') ? '#4CAF50' : '#ff5252'
+                }}>
+                  {usmapStatus}
+                </p>
+              )}
             </div>
           </div>
 

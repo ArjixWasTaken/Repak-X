@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { listen } from '@tauri-apps/api/event'
@@ -11,7 +11,8 @@ import {
   Search as SearchIcon,
   Clear as ClearIcon,
   ExpandMore as ExpandMoreIcon,
-  ChevronRight as ChevronRightIcon
+  ChevronRight as ChevronRightIcon,
+  Folder as FolderIcon
 } from '@mui/icons-material'
 import ModDetailsPanel from './components/ModDetailsPanel'
 import InstallModPanel from './components/InstallModPanel'
@@ -21,71 +22,124 @@ import './App.css'
 import './styles/theme.css'
 import logo from './assets/RepakIcon-x256.png'
 
+const toTagArray = (tags) => Array.isArray(tags) ? tags : (tags ? [tags] : [])
+
 // Mod Item Component
-function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleModSelection, handleToggleMod, handleDeleteMod, formatFileSize }) {
+function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleModSelection, handleToggleMod, handleDeleteMod, handleRemoveTag, formatFileSize, hideSuffix }) {
+  const [isDeleteHolding, setIsDeleteHolding] = useState(false)
+  const holdTimeoutRef = useRef(null)
+  const rawName = mod.custom_name || mod.path.split('\\').pop()
+  const nameWithoutExt = rawName.replace(/\.[^/.]+$/, '')
+  const suffixMatch = nameWithoutExt.match(/(_\d+_P)$/i)
+  const cleanName = suffixMatch ? nameWithoutExt.slice(0, -suffixMatch[0].length) : nameWithoutExt
+  const suffix = suffixMatch ? suffixMatch[0] : ''
+  const shouldShowSuffix = !hideSuffix && suffix
+  const tags = toTagArray(mod.custom_tags)
+
+  useEffect(() => () => clearTimeout(holdTimeoutRef.current), [])
+
+  const startDeleteHold = (event) => {
+    event.stopPropagation()
+    clearTimeout(holdTimeoutRef.current)
+    setIsDeleteHolding(true)
+    holdTimeoutRef.current = setTimeout(() => {
+      setIsDeleteHolding(false)
+      handleDeleteMod(mod.path)
+    }, 2000)
+  }
+
+  const cancelDeleteHold = (event) => {
+    event.stopPropagation()
+    clearTimeout(holdTimeoutRef.current)
+    if (isDeleteHolding) setIsDeleteHolding(false)
+  }
+
   return (
     <motion.div 
-      className={`mod-item ${selectedMod === mod ? 'selected' : ''} ${!mod.enabled ? 'disabled' : ''} ${selectedMods.has(mod.path) ? 'bulk-selected' : ''}`}
+      className={`mod-card mod-item ${selectedMod === mod ? 'selected' : ''} ${!mod.enabled ? 'disabled' : ''} ${selectedMods.has(mod.path) ? 'bulk-selected' : ''}`}
       initial={{ opacity: 0 }}
       animate={{ opacity: mod.enabled ? 1 : 0.5 }}
       whileHover={{ scale: 1.01 }}
       transition={{ duration: 0.2 }}
     >
-      <div className="mod-info">
-        <Tooltip title="Select mod">
-          <input
-            type="checkbox"
-            checked={selectedMods.has(mod.path)}
-            onChange={() => handleToggleModSelection(mod)}
-            onClick={(e) => e.stopPropagation()}
-            className="modern-checkbox"
-          />
-        </Tooltip>
-        <motion.span 
-          className="mod-name"
-          onClick={() => setSelectedMod(mod)}
-          whileHover={{ color: '#4a9eff' }}
-        >
-          {mod.enabled ? '✓' : '✗'} {mod.custom_name || mod.path.split('\\').pop()}
-        </motion.span>
+      <div className="mod-card-row">
+        <div className="mod-card-main">
+          <Tooltip title="Select mod">
+            <input
+              type="checkbox"
+              checked={selectedMods.has(mod.path)}
+              onChange={() => handleToggleModSelection(mod)}
+              onClick={(e) => e.stopPropagation()}
+              className="modern-checkbox"
+            />
+          </Tooltip>
+          <motion.button 
+            type="button"
+            className="mod-name-button"
+            onClick={() => setSelectedMod(mod)}
+            whileHover={{ color: '#4a9eff' }}
+          >
+            <span className="mod-status-icon">{mod.enabled ? '📦' : '✗'}</span>
+            <span className="mod-name-text">
+              {cleanName}
+              {shouldShowSuffix && <span className="mod-name-suffix">{suffix}</span>}
+            </span>
+          </motion.button>
+        </div>
         <span className="mod-size">{formatFileSize(mod.file_size)}</span>
       </div>
       
-      <div className="mod-actions">
-        {mod.custom_tags && mod.custom_tags.length > 0 && (
-          <div className="tag-container">
-            {mod.custom_tags.map(tag => (
-              <span key={tag} className="tag">
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
+      {tags.length > 0 && (
+        <div className="tag-container">
+          {tags.map(tag => (
+            <span key={tag} className="tag">
+              {tag}
+              <button
+                type="button"
+                className="tag-remove"
+                aria-label={`Remove ${tag}`}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleRemoveTag(mod.path, tag)
+                }}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      
+      <div className="mod-card-row mod-card-actions">
         <Tooltip title={mod.enabled ? 'Disable mod' : 'Enable mod'}>
-          <motion.button 
-            onClick={(e) => {
-              e.stopPropagation()
-              handleToggleMod(mod.path)
-            }}
-            className={`btn-modern ${mod.enabled ? 'btn-disable' : 'btn-enable'}`}
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+          <label
+            className={`mod-switch ${mod.enabled ? 'is-on' : ''}`}
+            onClick={(e) => e.stopPropagation()}
           >
-            {mod.enabled ? 'Disable' : 'Enable'}
-          </motion.button>
+            <input
+              type="checkbox"
+              checked={mod.enabled}
+              onChange={(e) => {
+                e.stopPropagation()
+                handleToggleMod(mod.path)
+              }}
+            />
+            <span className="mod-switch-track" />
+            <span className="mod-switch-text">{mod.enabled ? 'Enabled' : 'Disabled'}</span>
+          </label>
         </Tooltip>
-        <Tooltip title="Delete mod">
-          <motion.button 
-            onClick={(e) => {
-              e.stopPropagation()
-              handleDeleteMod(mod.path)
-            }}
-            className="btn-modern btn-danger"
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+        <Tooltip title="Hold 2s to delete">
+          <button
+            className={`btn-modern btn-danger hold-delete ${isDeleteHolding ? 'holding' : ''}`}
+            onMouseDown={startDeleteHold}
+            onMouseUp={cancelDeleteHold}
+            onMouseLeave={cancelDeleteHold}
+            onTouchStart={startDeleteHold}
+            onTouchEnd={cancelDeleteHold}
+            aria-label="Hold to delete mod"
           >
-            Delete
-          </motion.button>
+            ×
+          </button>
         </Tooltip>
       </div>
     </motion.div>
@@ -124,6 +178,9 @@ function App() {
   const [modsToInstall, setModsToInstall] = useState([])
   const [installLogs, setInstallLogs] = useState([])
   const [showInstallLogs, setShowInstallLogs] = useState(false)
+  // OPTIONAL: user-resizable height
+  const [drawerHeight, setDrawerHeight] = useState(380)
+  const resizingRef = useRef(false)
 
   useEffect(() => {
     loadInitialData()
@@ -145,23 +202,23 @@ function App() {
     })
 
     // Unified file drop handler function
-    const handleFileDrop = async (files) => {
-      console.log('Files dropped:', files)
-      const pakFiles = files.filter(f => f.toLowerCase().endsWith('.pak'))
-      
-      if (pakFiles.length > 0) {
-        try {
-          setStatus('Processing dropped files...')
-          const modsData = await invoke('parse_dropped_files', { paths: pakFiles })
-          console.log('Parsed mods:', modsData)
-          setModsToInstall(modsData)
-          setShowInstallPanel(true)
-        } catch (error) {
-          console.error('Parse error:', error)
-          setStatus(`Error parsing files: ${error}`)
+    const handleFileDrop = async (paths) => {
+      if (!paths || paths.length === 0) return
+      console.log('Dropped items:', paths)
+
+      try {
+        setStatus('Processing dropped items...')
+        const modsData = await invoke('parse_dropped_files', { paths })
+        if (!modsData || modsData.length === 0) {
+          setStatus('No installable mods found in dropped items')
+          return
         }
-      } else {
-        setStatus('No PAK files found in dropped items')
+        console.log('Parsed mods:', modsData)
+        setModsToInstall(modsData)
+        setShowInstallPanel(true)
+      } catch (error) {
+        console.error('Parse error:', error)
+        setStatus(`Error parsing dropped items: ${error}`)
       }
     }
 
@@ -175,12 +232,6 @@ function App() {
     const unlistenFileDrop = listen('tauri://file-drop', (event) => {
       const files = event.payload.paths || event.payload
       handleFileDrop(files)
-    })
-
-    // Listen for file system changes in mods directory
-    const unlistenModsChanged = listen('mods_dir_changed', () => {
-      console.log('Mods directory changed, reloading...')
-      loadMods()
     })
 
     // Add dragover event to prevent default browser behavior
@@ -199,7 +250,6 @@ function App() {
       unlistenDragDrop.then(f => f())
       unlistenFileDrop.then(f => f())
       unlistenLogs.then(f => f())
-      unlistenModsChanged.then(f => f())
       document.removeEventListener('dragover', preventDefault)
       document.removeEventListener('drop', preventDefault)
     }
@@ -232,28 +282,9 @@ function App() {
       const path = await invoke('get_game_path')
       setGamePath(path)
       
-      // Start file watcher
-      try {
-        await invoke('start_file_watcher')
-      } catch (e) {
-        console.warn('Failed to start file watcher:', e)
-      }
-
       const ver = await invoke('get_app_version')
       setVersion(ver)
       
-      // Check for updates
-      try {
-        const update = await invoke('check_for_updates')
-        if (update) {
-          console.log('Update available:', update)
-          setStatus(`Update available: v${update.latest} - ${update.url}`)
-          // You could show a dedicated modal here if desired
-        }
-      } catch (e) {
-        console.warn('Update check failed:', e)
-      }
-
       await loadMods()
       await loadFolders()
       await checkGame()
@@ -458,6 +489,17 @@ function App() {
     }
   }
 
+  const handleRemoveTag = async (modPath, tag) => {
+    try {
+      await invoke('remove_custom_tag', { modPath, tag })
+      setStatus(`Removed tag "${tag}"`)
+      await loadMods()
+      await loadTags()
+    } catch (error) {
+      setStatus(`Error removing tag: ${error}`)
+    }
+  }
+
   const handleDragStart = (e, mod) => {
     console.log('Drag started:', mod.path)
     e.dataTransfer.setData('text', mod.path)
@@ -546,8 +588,9 @@ function App() {
       if (!modName.includes(query)) return false
     }
 
-    // Tag filter
-    if (filterTag && !mod.custom_tags.includes(filterTag)) {
+    const modTags = toTagArray(mod.custom_tags)
+
+    if (filterTag && !modTags.includes(filterTag)) {
       return false
     }
 
@@ -616,9 +659,27 @@ function App() {
     localStorage.setItem('accentColor', newAccent);
   };
 
+  useEffect(() => {
+    const onMove = (e) => {
+      if (!resizingRef.current) return
+      const y = e.clientY
+      const vh = window.innerHeight
+      const newH = Math.min(Math.max(vh - y, 160), Math.round(vh * 0.85))
+      setDrawerHeight(newH)
+    }
+    const stop = () => { resizingRef.current = false }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', stop)
+    window.addEventListener('mouseleave', stop)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', stop)
+      window.removeEventListener('mouseleave', stop)
+    }
+  }, [])
+
   return (
     <div className="app">
-      {/* Install Mod Panel */}
       {showInstallPanel && (
         <InstallModPanel
           mods={modsToInstall}
@@ -627,44 +688,39 @@ function App() {
         />
       )}
 
-      {/* Settings Panel */}
-        {showSettings && (
-          <SettingsPanel
-            settings={{
-              globalUsmap,
-              hideSuffix
-            }}
-            onSave={(settings) => {
-              setGlobalUsmap(settings.globalUsmap);
-              setHideSuffix(settings.hideSuffix);
-              // Add any backend saving logic here
-              setShowSettings(false);
-            }}
-            onClose={() => setShowSettings(false)}
-            theme={theme}
-            setTheme={handleThemeChange}
-            accentColor={accentColor}
-            setAccentColor={handleAccentChange}
-          />
-        )}
+      {showSettings && (
+        <SettingsPanel
+          settings={{ globalUsmap, hideSuffix }}
+          onSave={handleSaveSettings}
+          onClose={() => setShowSettings(false)}
+          theme={theme}
+          setTheme={handleThemeChange}
+          accentColor={accentColor}
+          setAccentColor={handleAccentChange}
+          gamePath={gamePath}
+          onAutoDetectGamePath={handleAutoDetect}
+          onBrowseGamePath={handleBrowseGamePath}
+          isGamePathLoading={loading}
+        />
+      )}
 
-        <header className="header" style={{ display: 'flex', alignItems: 'center' }}>
-          <img src={logo} alt="Repak Icon" className="repak-icon" style={{ width: '50px', height: '50px', marginRight: '10px' }} />
-          <h1 style={{ margin: 0 }}>Xzant-GUI [UI TEST]</h1>
-          <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto' }}>
-            <button 
-              onClick={() => setShowSettings(true)} 
-              className="btn-settings"
-            >
-              ⚙️ Settings
-            </button>
-            <span className="version">v{version}</span>
-            {gameRunning && <span className="game-status">⚠️ Game Running</span>}
-          </div>
-        </header>
+      <header className="header" style={{ display: 'flex', alignItems: 'center' }}>
+        <img src={logo} alt="Repak Icon" className="repak-icon" style={{ width: '50px', height: '50px', marginRight: '10px' }} />
+        <h1 style={{ margin: 0 }}>Repak GUI Revamped [UI TEST]</h1>
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto' }}>
+          <button 
+            onClick={() => setShowSettings(true)} 
+            className="btn-settings"
+          >
+            ⚙️ Settings
+          </button>
+          <span className="version">v{version}</span>
+          {gameRunning && <span className="game-status">⚠️ Game Running</span>}
+        </div>
+      </header>
 
-        <div className="container">
-          {/* Game Path Section */}
+      <div className="container">
+        {/* Game Path Section */}
         <section className="section game-path-section">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h2 style={{ margin: 0 }}>Game Path</h2>
@@ -672,21 +728,11 @@ function App() {
               📦 Install Mod
             </button>
           </div>
-          <div className="path-controls">
-            <input 
-              type="text" 
-              value={gamePath} 
-              readOnly 
-              placeholder="No game path set"
-              className="path-input"
-            />
-            <button onClick={handleAutoDetect} disabled={loading}>
-              Auto Detect
-            </button>
-            <button onClick={handleBrowseGamePath}>
-              Browse
-            </button>
-          </div>
+          {!gamePath && (
+            <p style={{ margin: 0, color: '#999' }}>
+              Configure the game path from the Settings panel.
+            </p>
+          )}
         </section>
 
         {/* Main 2-Panel Layout */}
@@ -697,96 +743,123 @@ function App() {
             <section className="section mods-section">
               <div className="section-header">
                 <h2>Installed Mods ({filteredMods.length}/{mods.length})</h2>
-                <div style={{ display: 'flex', gap: '0.5rem' }}>
-                  <button onClick={handleCreateFolder} className="btn-small">
-                    + Folder
+                <div className="section-header-actions">
+                  <button onClick={handleCreateFolder} className="btn-ghost">
+                    <CreateNewFolderIcon fontSize="small" />
+                    Add Folder
                   </button>
-                  <button onClick={loadMods} className="btn-small">
-                    🔄 Refresh
+                  <button onClick={loadMods} className="btn-ghost">
+                    <RefreshIcon fontSize="small" />
+                    Refresh
                   </button>
                 </div>
               </div>
 
               {/* Search and Filters */}
               <div className="filters-bar">
-                <input
-                  type="text"
-                  placeholder="Search mods..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="search-input"
-                />
-                <select 
-                  value={filterTag}
-                  onChange={(e) => setFilterTag(e.target.value)}
-                  className="filter-select"
-                >
-                  <option value="">All Tags</option>
-                  {allTags.map(tag => (
-                    <option key={tag} value={tag}>{tag}</option>
-                  ))}
-                </select>
-                {(searchQuery || filterTag) && (
-                  <button 
-                    onClick={() => { setSearchQuery(''); setFilterTag(''); }}
-                    className="btn-small"
-                  >
-                    Clear Filters
-                  </button>
-                )}
-              </div>
-
-              {/* Bulk Actions Bar */}
-              {selectedMods.size > 0 && (
-                <div className="bulk-actions-bar">
-                  <span className="selected-count">{selectedMods.size} selected</span>
-                  <div style={{ display: 'flex', gap: '0.5rem', flex: 1, alignItems: 'center' }}>
-                    <select 
-                      onChange={(e) => e.target.value && handleAssignToFolder(e.target.value)}
-                      className="folder-select"
-                      defaultValue=""
+                <div className="mods-toolbar">
+                  <div className="toolbar-card filter-card">
+                    <div className="toolbar-field stretch">
+                      <SearchIcon className="toolbar-icon" fontSize="small" />
+                      <input
+                        type="text"
+                        placeholder="Search mods..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="toolbar-input"
+                      />
+                    </div>
+                    <select
+                      value={filterTag}
+                      onChange={(e) => setFilterTag(e.target.value)}
+                      className="toolbar-select"
                     >
-                      <option value="">Move to folder...</option>
-                      {folders.map(f => (
-                        <option key={f.id} value={f.id}>{f.name}</option>
+                      <option value="">All Tags</option>
+                      {allTags.map(tag => (
+                        <option key={tag} value={tag}>{tag}</option>
                       ))}
                     </select>
-                    <input
-                      type="text"
-                      list="existing-tags"
-                      placeholder="Add tag (type or select)..."
-                      value={newTagInput}
-                      onChange={(e) => setNewTagInput(e.target.value)}
-                      onKeyPress={(e) => e.key === 'Enter' && handleAddCustomTag()}
-                      style={{ padding: '0.25rem 0.5rem', flex: 1 }}
-                    />
-                    <datalist id="existing-tags">
-                      {allTags.map(tag => (
-                        <option key={tag} value={tag} />
-                      ))}
-                    </datalist>
-                    <button onClick={handleAddCustomTag} className="btn-small">
-                      Add Tag
-                    </button>
-                    <button onClick={handleDeselectAll} className="btn-small">
-                      Clear
-                    </button>
+                    {(searchQuery || filterTag) && (
+                      <button
+                        onClick={() => { setSearchQuery(''); setFilterTag(''); }}
+                        className="btn-chip"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+
+                  <div className={`toolbar-card selection-card ${selectedMods.size === 0 ? 'inactive' : ''}`}>
+                    <div className="selection-header">
+                      <span className="selected-count-chip">
+                        {selectedMods.size > 0 ? `${selectedMods.size} selected` : 'No mods selected'}
+                      </span>
+                      <div className="selection-shortcuts">
+                        {mods.length > 0 && (
+                          <button onClick={handleSelectAll} className="btn-link">
+                            Select All
+                          </button>
+                        )}
+                        {selectedMods.size > 0 && (
+                          <button onClick={handleDeselectAll} className="btn-link">
+                            Clear Selection
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    <div className="selection-actions">
+                      <div className="toolbar-field block">
+                        <label htmlFor="move-to-folder">Move to folder</label>
+                        <select
+                          id="move-to-folder"
+                          className="toolbar-select fill"
+                          disabled={selectedMods.size === 0}
+                          defaultValue=""
+                          onChange={(e) => {
+                            const folderId = e.target.value
+                            if (!folderId) return
+                            handleAssignToFolder(folderId)
+                            e.target.value = ''
+                          }}
+                        >
+                          <option value="">Choose folder...</option>
+                          {folders.map(f => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="toolbar-field block">
+                        <label htmlFor="tag-input">Add tag</label>
+                        <div className="tag-input-row">
+                          <input
+                            id="tag-input"
+                            type="text"
+                            list="existing-tags"
+                            placeholder="Type or select a tag"
+                            value={newTagInput}
+                            onChange={(e) => setNewTagInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && handleAddCustomTag()}
+                            disabled={selectedMods.size === 0}
+                            className="toolbar-input"
+                          />
+                          <button
+                            onClick={handleAddCustomTag}
+                            className="btn-pill"
+                            disabled={selectedMods.size === 0 || !newTagInput.trim()}
+                          >
+                            Add
+                          </button>
+                        </div>
+                        <datalist id="existing-tags">
+                          {allTags.map(tag => (
+                            <option key={tag} value={tag} />
+                          ))}
+                        </datalist>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              )}
-
-              {mods.length > 0 && (
-                <div className="select-actions">
-                  <button onClick={handleSelectAll} className="btn-link">
-                    Select All
-                  </button>
-                  {selectedMods.size > 0 && (
-                    <button onClick={handleDeselectAll} className="btn-link">
-                      Deselect All
-                    </button>
-                  )}
-                </div>
-              )}
+              </div>
 
               {/* Mods List with Expandable Folders */}
               <div className="mod-list">
@@ -796,37 +869,41 @@ function App() {
                   </p>
                 ) : (
                   <>
-                    {/* Folders */}
                     {folders.map(folder => {
                       const folderMods = modsByFolder[folder.id] || []
                       if (folderMods.length === 0) return null
+                      const isExpanded = expandedFolders.has(folder.id)
                       
                       return (
-                        <div key={folder.id} className="folder-group">
-                          <div 
-                            className="folder-header"
-                            onClick={() => toggleFolder(folder.id)}
-                          >
-                            <span className="folder-icon">
-                              {expandedFolders.has(folder.id) ? '📂' : '📁'}
-                            </span>
-                            <span className="folder-name">{folder.name}</span>
-                            <span className="folder-count">({folderMods.length})</span>
+                        <div key={folder.id} className={`folder-card ${isExpanded ? 'open' : ''}`}>
+                          <div className="folder-card-header">
+                            <button 
+                              className="folder-card-toggle"
+                              onClick={() => toggleFolder(folder.id)}
+                            >
+                              <span className="folder-label">
+                                <ChevronRightIcon className={`folder-chevron ${isExpanded ? 'open' : ''}`} fontSize="small" />
+                                <FolderIcon className="folder-icon" fontSize="small" />
+                                <span className="folder-name">{folder.name}</span>
+                              </span>
+                              <span className="folder-count-chip">
+                                {folderMods.length} {folderMods.length === 1 ? 'mod' : 'mods'}
+                              </span>
+                            </button>
                             <button 
                               onClick={(e) => {
                                 e.stopPropagation()
                                 handleDeleteFolder(folder.id)
                               }}
-                              className="btn-danger-small"
-                              style={{ marginLeft: 'auto' }}
+                              className="folder-delete"
                             >
                               ×
                             </button>
                           </div>
                           
-                          {expandedFolders.has(folder.id) && (
-                            <div className="folder-contents">
-                              {folderMods.map((mod, idx) => (
+                          {isExpanded && (
+                            <div className="folder-card-body mod-card-grid">
+                              {folderMods.map((mod) => (
                                 <ModItem 
                                   key={mod.path} 
                                   mod={mod}
@@ -836,7 +913,9 @@ function App() {
                                   handleToggleModSelection={handleToggleModSelection}
                                   handleToggleMod={handleToggleMod}
                                   handleDeleteMod={handleDeleteMod}
+                                  handleRemoveTag={handleRemoveTag}
                                   formatFileSize={formatFileSize}
+                                  hideSuffix={hideSuffix}
                                 />
                               ))}
                             </div>
@@ -845,22 +924,34 @@ function App() {
                       )
                     })}
                     
-                    {/* Root level mods (not in any folder) */}
                     {modsByFolder['_root'] && modsByFolder['_root'].length > 0 && (
-                      <div className="root-mods">
-                        {modsByFolder['_root'].map((mod) => (
-                          <ModItem 
-                            key={mod.path}
-                            mod={mod}
-                            selectedMod={selectedMod}
-                            selectedMods={selectedMods}
-                            setSelectedMod={setSelectedMod}
-                            handleToggleModSelection={handleToggleModSelection}
-                            handleToggleMod={handleToggleMod}
-                            handleDeleteMod={handleDeleteMod}
-                            formatFileSize={formatFileSize}
-                          />
-                        ))}
+                      <div className="folder-card open root-folder">
+                        <div className="folder-card-header no-toggle">
+                          <div className="folder-label">
+                            <FolderIcon className="folder-icon" fontSize="small" />
+                            <span className="folder-name">Ungrouped Mods</span>
+                          </div>
+                          <span className="folder-count-chip">
+                            {modsByFolder['_root'].length} {modsByFolder['_root'].length === 1 ? 'mod' : 'mods'}
+                          </span>
+                        </div>
+                        <div className="folder-card-body mod-card-grid">
+                          {modsByFolder['_root'].map((mod) => (
+                            <ModItem 
+                              key={mod.path}
+                              mod={mod}
+                              selectedMod={selectedMod}
+                              selectedMods={selectedMods}
+                              setSelectedMod={setSelectedMod}
+                              handleToggleModSelection={handleToggleModSelection}
+                              handleToggleMod={handleToggleMod}
+                              handleDeleteMod={handleDeleteMod}
+                              handleRemoveTag={handleRemoveTag}
+                              formatFileSize={formatFileSize}
+                              hideSuffix={hideSuffix}
+                            />
+                          ))}
+                        </div>
                       </div>
                     )}
                   </>
@@ -883,7 +974,6 @@ function App() {
                   <ModDetailsPanel 
                     mod={selectedMod}
                     onClose={() => setSelectedMod(null)}
-                    onUpdate={loadMods}
                   />
                 </div>
 
@@ -899,36 +989,70 @@ function App() {
              )}
           </div>
         </div>
-
-        {/* Status Bar */}
-        {status && (
-          <div className="status-bar">
-            {status}
-          </div>
-        )}
-
-        {/* Installation Log Panel */}
-        {showInstallLogs && (
-          <div className="install-log-panel">
-            <div className="log-panel-header">
-              <h3>Installation Log</h3>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button onClick={() => setInstallLogs([])} className="btn-link">Clear</button>
-                <button onClick={() => setShowInstallLogs(false)} className="btn-link">Hide</button>
-              </div>
-            </div>
-            <div className="log-panel-content">
-              {installLogs.length === 0 ? (
-                <div style={{ color: '#666', padding: '0.5rem' }}>Waiting for installation...</div>
-              ) : (
-                installLogs.map((log, idx) => (
-                  <div key={idx} className="log-panel-entry">{log}</div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
       </div>
+
+      <motion.div
+        className="install-drawer"
+        animate={{ height: showInstallLogs ? drawerHeight : 36 }}
+        transition={{ type: 'tween', duration: 0.25 }}
+      >
+        <div
+          className="install-drawer-header"
+          onClick={() => setShowInstallLogs(v => !v)}
+        >
+          <span className="status-text">{status || 'Idle'}</span>
+          <div
+            className="drawer-actions"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              className="btn-link"
+              onClick={() => setShowInstallLogs(v => !v)}
+            >
+              {showInstallLogs ? 'Hide Log ▲' : 'Show Log ▼'}
+            </button>
+            {installLogs.length > 0 && showInstallLogs && (
+              <button
+                className="btn-link"
+                onClick={() => setInstallLogs([])}
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+        {showInstallLogs && (
+          <div
+            className="drawer-resize-handle"
+            onMouseDown={(e) => {
+              e.stopPropagation()
+              resizingRef.current = true
+            }}
+            title="Drag to resize"
+          />
+        )}
+        <AnimatePresence initial={false}>
+          {showInstallLogs && (
+            <motion.div
+              className="install-drawer-body"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 12 }}
+              transition={{ duration: 0.2 }}
+            >
+              {installLogs.length === 0 ? (
+                <div className="log-empty">Waiting for installation...</div>
+              ) : (
+                <div className="log-scroll">
+                  {installLogs.map((log, i) => (
+                    <div key={i} className="log-line">{log}</div>
+                  ))}
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </motion.div>
 
       <footer className="footer">
         <p>Drag & drop PAK files anywhere to install mods</p>
