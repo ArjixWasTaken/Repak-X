@@ -1,6 +1,0 @@
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\SerializeSizeCalculator\obj\Release\net8.0\win-x64\SerializeSizeCalculator.csproj.AssemblyReference.cache
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\SerializeSizeCalculator\obj\Release\net8.0\win-x64\SerializeSizeCalculator.GeneratedMSBuildEditorConfig.editorconfig
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\SerializeSizeCalculator\obj\Release\net8.0\win-x64\SerializeSizeCalculator.AssemblyInfoInputs.cache
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\SerializeSizeCalculator\obj\Release\net8.0\win-x64\SerializeSizeCalculator.AssemblyInfo.cs
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\SerializeSizeCalculator\obj\Release\net8.0\win-x64\SerializeSizeCalculator.csproj.CoreCompileInputs.cache
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\SerializeSizeCalculator\obj\Release\net8.0\win-x64\SerializeSizeCalculator.sourcelink.json
