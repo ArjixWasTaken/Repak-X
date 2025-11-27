@@ -20,6 +20,9 @@ public class UAssetRequest
     [JsonPropertyName("file_path")]
     public string? FilePath { get; set; }
     
+    [JsonPropertyName("file_paths")]
+    public List<string>? FilePaths { get; set; }
+    
     [JsonPropertyName("mip_gen")]
     public string? MipGen { get; set; }
     
@@ -48,24 +51,31 @@ public class Program
     {
         try
         {
-            // Read JSON request from stdin
-            var input = await Console.In.ReadToEndAsync();
-            if (string.IsNullOrWhiteSpace(input))
+            // Interactive mode: Read line by line
+            string? line;
+            while ((line = await Console.In.ReadLineAsync()) != null)
             {
-                WriteError("No input provided");
-                return;
-            }
+                if (string.IsNullOrWhiteSpace(line)) continue;
 
-            var request = JsonSerializer.Deserialize<UAssetRequest>(input);
-            if (request == null)
-            {
-                WriteError("Invalid JSON request");
-                return;
-            }
+                try 
+                {
+                    var request = JsonSerializer.Deserialize<UAssetRequest>(line);
+                    if (request == null)
+                    {
+                        WriteError("Invalid JSON request");
+                        continue;
+                    }
 
-            var response = ProcessRequest(request);
-            var responseJson = JsonSerializer.Serialize(response);
-            Console.WriteLine(responseJson);
+                    var response = ProcessRequest(request);
+                    var responseJson = JsonSerializer.Serialize(response);
+                    // Ensure single line output
+                    Console.WriteLine(responseJson.Replace("\r", "").Replace("\n", ""));
+                }
+                catch (JsonException)
+                {
+                    WriteError("Invalid JSON format");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -82,9 +92,17 @@ public class Program
                 "detect_texture" => DetectTexture(request.FilePath),
                 "set_mip_gen" => SetMipGen(request.FilePath, request.MipGen),
                 "get_texture_info" => GetTextureInfo(request.FilePath),
-                "detect_mesh" => DetectMesh(request.FilePath),
+                "detect_mesh" => DetectSkeletalMesh(request.FilePath), // Backward compat: "detect_mesh" implies Skeletal for Fix Mesh
+                "detect_skeletal_mesh" => DetectSkeletalMesh(request.FilePath),
+                "detect_static_mesh" => DetectStaticMesh(request.FilePath),
                 "patch_mesh" => PatchMesh(request.FilePath, request.UexpPath),
                 "get_mesh_info" => GetMeshInfo(request.FilePath),
+                // Batch detection - processes all files in parallel, returns true if any match
+                "batch_detect_skeletal_mesh" => BatchDetectAssetClass(request.FilePaths, "SkeletalMesh"),
+                "batch_detect_static_mesh" => BatchDetectAssetClass(request.FilePaths, "StaticMesh"),
+                "batch_detect_texture" => BatchDetectTexture(request.FilePaths),
+                // Debug action to dump asset info
+                "debug_asset_info" => DebugAssetInfo(request.FilePath),
                 _ => new UAssetResponse 
                 { 
                     Success = false, 
@@ -100,6 +118,364 @@ public class Program
                 Message = $"Error processing request: {ex.Message}" 
             };
         }
+    }
+
+    private static UAssetResponse DebugAssetInfo(string? filePath)
+    {
+        if (string.IsNullOrEmpty(filePath)) return new UAssetResponse { Success = false, Message = "File path required" };
+        if (!File.Exists(filePath)) return new UAssetResponse { Success = false, Message = $"File not found: {filePath}" };
+
+        try
+        {
+            string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
+            Usmap? mappings = null;
+            if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
+            {
+                mappings = new Usmap(usmapPath);
+            }
+
+            // Pass mappings during construction for unversioned assets
+            var asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings);
+            
+            var info = new Dictionary<string, object>();
+            
+            // Collect export info
+            var exports = new List<Dictionary<string, string>>();
+            foreach (var export in asset.Exports)
+            {
+                var exportInfo = new Dictionary<string, string>
+                {
+                    ["ExportType"] = export.GetType().Name,
+                    ["ObjectName"] = export.ObjectName?.Value?.Value ?? "null",
+                    ["ClassIndex"] = export.ClassIndex.ToString(),
+                    ["IsImport"] = export.ClassIndex.IsImport().ToString()
+                };
+                
+                if (export.ClassIndex.IsImport())
+                {
+                    var import = export.ClassIndex.ToImport(asset);
+                    if (import != null)
+                    {
+                        exportInfo["ImportClassName"] = import.ObjectName?.Value?.Value ?? "null";
+                        exportInfo["ImportClassPackage"] = import.ClassPackage?.Value?.Value ?? "null";
+                    }
+                }
+                
+                exports.Add(exportInfo);
+            }
+            info["Exports"] = exports;
+            
+            // Collect all imports
+            var imports = new List<string>();
+            foreach (var imp in asset.Imports)
+            {
+                imports.Add(imp.ObjectName?.Value?.Value ?? "null");
+            }
+            info["AllImports"] = imports;
+            
+            return new UAssetResponse 
+            { 
+                Success = true, 
+                Message = $"Asset info for {Path.GetFileName(filePath)}",
+                Data = info
+            };
+        }
+        catch (Exception ex)
+        {
+            return new UAssetResponse { Success = false, Message = $"Error reading asset: {ex.Message}" };
+        }
+    }
+
+    private static UAssetResponse DetectSkeletalMesh(string? filePath)
+    {
+        return DetectAssetClass(filePath, "SkeletalMesh");
+    }
+
+    private static UAssetResponse DetectStaticMesh(string? filePath)
+    {
+        return DetectAssetClass(filePath, "StaticMesh");
+    }
+
+    private static UAssetResponse DetectAssetClass(string? filePath, string targetClass)
+    {
+        if (string.IsNullOrEmpty(filePath)) return new UAssetResponse { Success = false, Message = "File path required" };
+        if (!File.Exists(filePath)) return new UAssetResponse { Success = false, Message = $"File not found: {filePath}" };
+
+        try
+        {
+            string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
+            Usmap? mappings = null;
+            if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
+            {
+                mappings = new Usmap(usmapPath);
+            }
+
+            // Pass mappings during construction for unversioned assets
+            var asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings);
+            
+            bool isMatch = IsAssetClass(asset, targetClass);
+            
+            return new UAssetResponse 
+            { 
+                Success = true, 
+                Message = isMatch ? $"File is {targetClass}" : $"File is not {targetClass}",
+                Data = isMatch
+            };
+        }
+        catch (Exception ex)
+        {
+             return new UAssetResponse { Success = false, Message = $"Error reading uasset: {ex.Message}" };
+        }
+    }
+
+    private static bool IsAssetClass(UAsset asset, string targetClass)
+    {
+        foreach (var export in asset.Exports)
+        {
+            // Method 1: Check export type name directly (most reliable for UE5)
+            string exportTypeName = export.GetType().Name;
+            if (exportTypeName.Contains(targetClass, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            
+            // Method 2: Check ClassIndex import
+            if (export.ClassIndex.IsImport())
+            {
+                var import = export.ClassIndex.ToImport(asset);
+                if (import != null)
+                {
+                    string className = import.ObjectName?.Value?.Value ?? "";
+                    if (className.Contains(targetClass, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+            
+            // Method 3: Check export's ObjectName for mesh naming conventions
+            string? objectName = export.ObjectName?.Value?.Value;
+            if (!string.IsNullOrEmpty(objectName))
+            {
+                if (targetClass.Equals("SkeletalMesh", StringComparison.OrdinalIgnoreCase))
+                {
+                    // SK_ prefix is standard UE naming for skeletal meshes
+                    if (objectName.StartsWith("SK_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+                else if (targetClass.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase))
+                {
+                    // SM_ prefix is standard UE naming for static meshes
+                    if (objectName.StartsWith("SM_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+            
+            // Method 4: Check all imports in the asset for class references
+            foreach (var imp in asset.Imports)
+            {
+                string impName = imp.ObjectName?.Value?.Value ?? "";
+                if (impName.Equals(targetClass, StringComparison.OrdinalIgnoreCase) ||
+                    impName.Equals("U" + targetClass, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    
+    // Check by filename pattern when UAssetAPI parsing fails
+    private static bool IsAssetClassByFilename(string filePath, string targetClass)
+    {
+        string fileName = Path.GetFileNameWithoutExtension(filePath);
+        
+        if (targetClass.Equals("SkeletalMesh", StringComparison.OrdinalIgnoreCase))
+        {
+            return fileName.StartsWith("SK_", StringComparison.OrdinalIgnoreCase);
+        }
+        else if (targetClass.Equals("StaticMesh", StringComparison.OrdinalIgnoreCase))
+        {
+            return fileName.StartsWith("SM_", StringComparison.OrdinalIgnoreCase);
+        }
+        
+        return false;
+    }
+
+    // Batch detection - processes files in parallel for speed
+    private static UAssetResponse BatchDetectAssetClass(List<string>? filePaths, string targetClass)
+    {
+        if (filePaths == null || filePaths.Count == 0)
+            return new UAssetResponse { Success = false, Message = "file_paths required" };
+
+        string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
+        Usmap? mappings = null;
+        if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
+        {
+            mappings = new Usmap(usmapPath);
+        }
+
+        // DEBUG: Log info about SK_ files to find out actual class names
+        var debugInfo = new List<string>();
+        debugInfo.Add($"USMAP_PATH env: {usmapPath ?? "NOT SET"}");
+        debugInfo.Add($"USMAP exists: {(usmapPath != null && File.Exists(usmapPath))}");
+        debugInfo.Add($"Mappings loaded: {mappings != null}");
+        
+        foreach (var filePath in filePaths)
+        {
+            if (!File.Exists(filePath)) continue;
+            string fileName = Path.GetFileName(filePath);
+            if (fileName.StartsWith("SK_", StringComparison.OrdinalIgnoreCase))
+            {
+                // Check for associated .uexp file
+                string uexpPath = Path.ChangeExtension(filePath, ".uexp");
+                bool hasUexp = File.Exists(uexpPath);
+                debugInfo.Add($"[{fileName}] uexp exists: {hasUexp} at {uexpPath}");
+                
+                // Check file size and first bytes for debugging
+                try
+                {
+                    var fileBytes = File.ReadAllBytes(filePath);
+                    debugInfo.Add($"[{fileName}] Size: {fileBytes.Length} bytes");
+                    debugInfo.Add($"[{fileName}] First 16 bytes: {BitConverter.ToString(fileBytes.Take(16).ToArray())}");
+                    
+                    // Check magic number
+                    if (fileBytes.Length >= 4)
+                    {
+                        uint magic = BitConverter.ToUInt32(fileBytes, 0);
+                        debugInfo.Add($"[{fileName}] Magic: 0x{magic:X8} (expected 0x9E2A83C1 for uasset)");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    debugInfo.Add($"[{fileName}] Read bytes error: {ex.Message}");
+                }
+                
+                // Try loading with SkipParsingExports flag
+                UAsset? asset = null;
+                try
+                {
+                    asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings, CustomSerializationFlags.SkipParsingExports);
+                    debugInfo.Add($"[{fileName}] Loaded with SkipParsingExports");
+                }
+                catch (Exception ex1)
+                {
+                    debugInfo.Add($"[{fileName}] SkipParsingExports failed: {ex1.Message}");
+                    
+                    try
+                    {
+                        asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings);
+                        debugInfo.Add($"[{fileName}] Loaded normally");
+                    }
+                    catch (Exception ex2)
+                    {
+                        debugInfo.Add($"[{fileName}] Normal load failed: {ex2.Message}");
+                    }
+                }
+                
+                if (asset == null)
+                {
+                    debugInfo.Add($"[{fileName}] Failed to load");
+                    continue;
+                }
+
+                try
+                {
+                    foreach (var export in asset.Exports)
+                    {
+                        string exportType = export.GetType().Name;
+                        string? objName = export.ObjectName?.Value?.Value;
+                        string importClass = "";
+                        if (export.ClassIndex.IsImport())
+                        {
+                            var imp = export.ClassIndex.ToImport(asset);
+                            importClass = imp?.ObjectName?.Value?.Value ?? "";
+                        }
+                        debugInfo.Add($"[{fileName}] Export: {exportType}, Obj: {objName}, ImportClass: {importClass}");
+                    }
+                    
+                    foreach (var imp in asset.Imports)
+                    {
+                        debugInfo.Add($"[{fileName}] Import: {imp.ObjectName?.Value?.Value}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    debugInfo.Add($"[{fileName}] Error: {ex.Message}");
+                }
+            }
+        }
+        
+        // Write debug info to a file for analysis
+        if (debugInfo.Count > 0)
+        {
+            string debugPath = Path.Combine(Path.GetTempPath(), "uasset_debug.txt");
+            File.WriteAllLines(debugPath, debugInfo);
+        }
+
+        // Process files in parallel for maximum speed
+        // Use SkipParsingExports for faster detection (only reads headers + imports)
+        bool foundMatch = filePaths.AsParallel().Any(filePath =>
+        {
+            if (!File.Exists(filePath)) return false;
+            try
+            {
+                // First try with SkipParsingExports (fast, works without full parsing)
+                var asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings, CustomSerializationFlags.SkipParsingExports);
+                return IsAssetClass(asset, targetClass);
+            }
+            catch
+            {
+                // Fallback to normal loading
+                try
+                {
+                    var asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings);
+                    return IsAssetClass(asset, targetClass);
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        });
+
+        return new UAssetResponse
+        {
+            Success = true,
+            Message = foundMatch ? $"Found {targetClass} in batch" : $"No {targetClass} found in batch",
+            Data = foundMatch
+        };
+    }
+
+    private static UAssetResponse BatchDetectTexture(List<string>? filePaths)
+    {
+        if (filePaths == null || filePaths.Count == 0)
+            return new UAssetResponse { Success = false, Message = "file_paths required" };
+
+        // Process files in parallel for maximum speed
+        bool foundMatch = filePaths.AsParallel().Any(filePath =>
+        {
+            if (!File.Exists(filePath)) return false;
+            try
+            {
+                return IsTexture2DAsset(filePath, null) || IsLikelyTextureUAsset(filePath);
+            }
+            catch
+            {
+                return false;
+            }
+        });
+
+        return new UAssetResponse
+        {
+            Success = true,
+            Message = foundMatch ? "Found Texture in batch" : "No Texture found in batch",
+            Data = foundMatch
+        };
     }
 
     private static UAssetResponse DetectTexture(string? filePath)

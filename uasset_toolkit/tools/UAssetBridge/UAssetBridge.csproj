@@ -15,7 +15,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\UAssetAPI\UAssetAPI.csproj" />
+    <ProjectReference Include="..\..\..\UAssetAPI\UAssetAPI\UAssetAPI.csproj" />
   </ItemGroup>
 
 </Project>
