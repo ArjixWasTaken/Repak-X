@@ -1,34 +1,18 @@
 pub mod install_mod_logic;
 
-use crate::install_mod::install_mod_logic::archives::*;
-use crate::install_mod::install_mod_logic::pak_files::create_repak_from_pak;
+use crate::install_mod::install_mod_logic::archives::{extract_zip, extract_rar};
 use crate::uasset_detection::{detect_mesh_files, detect_texture_files};
 use crate::utils::{collect_files, get_current_pak_characteristics};
 use crate::utoc_utils::read_utoc;
-// Egui imports - only needed for egui version (main.rs), not for Tauri (main_tauri.rs)
-// use crate::{setup_custom_style, ICON};
-// use eframe::egui;
-// use eframe::egui::{Align, Checkbox, ComboBox, Context, Label, TextEdit};
-// use egui_extras::{Column, TableBuilder};
-// use egui_flex::{item, Flex, FlexAlign};
-use std::collections::BTreeSet;
-use std::fs;
-use dirs;
-use serde_json::Value as JsonValue;
-use install_mod_logic::install_mods_in_viewport;
 use log::{debug, error};
 use repak::utils::AesKey;
 use repak::Compression::Oodle;
 use repak::{Compression, PakReader};
-use serde::de::Unexpected::Str;
 use std::fs::File;
 use std::io::BufReader;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::Ordering::SeqCst;
-use std::sync::atomic::{AtomicBool, AtomicI32};
-use std::sync::{Arc, LazyLock};
-use std::thread;
+use std::sync::LazyLock;
 use tempfile::tempdir;
 use walkdir::WalkDir;
 
@@ -87,52 +71,8 @@ impl Default for InstallableMod {
     }
 }
 
-#[derive(Debug)]
-pub struct ModInstallRequest {
-    pub(crate) mods: Vec<InstallableMod>,
-    pub mod_directory: PathBuf,
-    pub animate: bool,
-    pub total_mods: f32,
-    pub installed_mods_cbk: Arc<AtomicI32>,
-    pub joined_thread: Option<thread::JoinHandle<()>>,
-    pub stop_thread: Arc<AtomicBool>,
-    // Filtering state
-    pub filter_enabled: bool,
-    pub selected_filter_types: std::collections::HashSet<String>,
-    pub show_unknown_tagging_dialog: bool,
-    pub unknown_mod_being_tagged: Option<usize>,
-    pub new_tag_input: String,
-}
-impl ModInstallRequest {
-    pub fn new(mods: Vec<InstallableMod>, mod_directory: PathBuf) -> Self {
-        let len = mods.iter().map(|m| m.total_files).sum::<usize>();
-        Self {
-            animate: false,
-            mods,
-            mod_directory,
-            total_mods: len as f32,
-            installed_mods_cbk: Arc::new(AtomicI32::new(0)),
-            joined_thread: None,
-            stop_thread: Arc::new(AtomicBool::new(false)),
-            filter_enabled: false,
-            selected_filter_types: std::collections::HashSet::new(),
-            show_unknown_tagging_dialog: false,
-            unknown_mod_being_tagged: None,
-            new_tag_input: String::new(),
-        }
-    }
-}
-
-impl ModInstallRequest {
-    // Egui UI function - stubbed out for Tauri build
-    // The full implementation is in the egui version (main.rs)
-    #[allow(dead_code)]
-    pub fn new_mod_dialog(&mut self, _ctx: &(), _show_callback: &mut bool) {
-        // This function is not used in Tauri version
-        unimplemented!("This function is only available in the egui version")
-    }
-    
-    /* Original egui implementation:
+/* Legacy egui ModInstallRequest - removed for Tauri build
+   Original egui implementation:
     pub fn new_mod_dialog(&mut self, ctx: &egui::Context, show_callback: &mut bool) {
         let viewport_options = egui::ViewportBuilder::default()
             .with_title("Install mods")
@@ -571,48 +511,7 @@ impl ModInstallRequest {
                 }
             });
     }
-    */ // End of egui implementation
-}
-
-// Read global custom tags from the main config and pending file
-fn read_global_custom_tags() -> Vec<String> {
-    let mut out: BTreeSet<String> = BTreeSet::new();
-    // Config dir
-    let mut cfg = dirs::config_dir().unwrap_or_default();
-    cfg.push("repak_manager");
-    // repak_mod_manager.json
-    let mut config_path = cfg.clone();
-    config_path.push("repak_mod_manager.json");
-    if let Ok(s) = fs::read_to_string(&config_path) {
-        if let Ok(json) = serde_json::from_str::<JsonValue>(&s) {
-            if let Some(arr) = json.get("custom_tag_catalog").and_then(|v| v.as_array()) {
-                for v in arr { if let Some(t) = v.as_str() { out.insert(t.to_string()); } }
-            }
-            if let Some(meta) = json.get("mod_metadata").and_then(|v| v.as_array()) {
-                for m in meta {
-                    if let Some(tags) = m.get("custom_tags").and_then(|v| v.as_array()) {
-                        for t in tags { if let Some(s) = t.as_str() { out.insert(s.to_string()); } }
-                    }
-                }
-            }
-        }
-    }
-    // pending_custom_tags.json
-    let mut pending = cfg.clone();
-    pending.push("pending_custom_tags.json");
-    if let Ok(s) = fs::read_to_string(&pending) {
-        if let Ok(json) = serde_json::from_str::<JsonValue>(&s) {
-            if let Some(obj) = json.as_object() {
-                for (_k, v) in obj.iter() {
-                    if let Some(arr) = v.as_array() {
-                        for t in arr { if let Some(s) = t.as_str() { out.insert(s.to_string()); } }
-                    }
-                }
-            }
-        }
-    }
-    out.into_iter().collect()
-}
+    */ // End of legacy egui implementation
 
 pub static AES_KEY: LazyLock<AesKey> = LazyLock::new(|| {
     AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")

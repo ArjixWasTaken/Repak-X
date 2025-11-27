@@ -69,28 +69,125 @@ pub fn get_character_mod_skin(file: &str) -> Option<ModType> {
 }
 pub fn get_current_pak_characteristics(mod_contents: Vec<String>) -> String {
     let mut fallback: Option<String> = None;
+    
+    // Track what content types we find
+    let mut has_skeletal_mesh = false;
+    let mut has_static_mesh = false;
+    let mut has_texture = false;
+    let mut has_material = false;
+    let mut has_audio = false;
+    let mut has_movies = false;
+    let mut has_ui = false;
+    let mut character_name: Option<String> = None;
 
     for file in &mod_contents {
         let path = file
             .strip_prefix("Marvel/Content/Marvel/")
             .or_else(|| file.strip_prefix("/Game/Marvel/"))
             .unwrap_or(file);
+        
+        let filename = path.split('/').last().unwrap_or("");
+        let filename_lower = filename.to_lowercase();
+        let path_lower = path.to_lowercase();
+
+        // Check for specific asset types by filename pattern
+        // Note: Internal paths may or may not have .uasset extension
+        let is_uasset = filename_lower.ends_with(".uasset") || !filename_lower.contains('.');
+        
+        if filename_lower.starts_with("sk_") && is_uasset {
+            has_skeletal_mesh = true;
+        }
+        if filename_lower.starts_with("sm_") && is_uasset {
+            has_static_mesh = true;
+        }
+        if filename_lower.starts_with("t_") && is_uasset {
+            has_texture = true;
+        }
+        
+        // VFX: MI_ files in VFX path (e.g. /Game/Marvel/VFX/Materials/...)
+        // Check both original file path and stripped path
+        let file_lower = file.to_lowercase();
+        if filename_lower.starts_with("mi_") && (path_lower.contains("/vfx/") || path_lower.starts_with("vfx/") || file_lower.contains("/vfx/")) {
+            has_material = true;
+        }
+        
+        // Check path-based categories
+        if path_lower.contains("wwiseaudio") || file_lower.contains("wwiseaudio") {
+            has_audio = true;
+        }
+        
+        // UI: Files in UI folder
+        if path_lower.contains("/ui/") || path_lower.starts_with("ui/") || file_lower.contains("/ui/") {
+            has_ui = true;
+        }
+        
+        // Movies: Files in Movies folder (placeholder - user to research exact criteria)
+        if path_lower.contains("/movies/") || path_lower.starts_with("movies/") || file_lower.contains("/movies/") || path_lower.ends_with(".bik") || path_lower.ends_with(".mp4") {
+            has_movies = true;
+        }
 
         let category = path.split('/').next().unwrap_or_default();
 
         match category {
             "Characters" => {
                 match get_character_mod_skin(path) {
-                    Some(ModType::Custom(skin)) => return skin,
+                    Some(ModType::Custom(skin)) => character_name = Some(skin),
                     Some(ModType::Default(name)) => fallback = Some(name),
-                    None => return "Character (Unknown)".to_string(),
+                    None => {}
                 }
             }
-            "UI" => return "UI".to_string(),
-            "Movies" => return "Movies".to_string(),
-            _ if path.contains("WwiseAudio") => return "Audio".to_string(),
             _ => {}
         }
+    }
+
+    // Priority order for mod type determination
+    // Audio and Movies are special standalone types
+    if has_audio && !has_skeletal_mesh && !has_static_mesh && !has_texture && !has_material {
+        return "Audio".to_string();
+    }
+    if has_movies && !has_skeletal_mesh && !has_static_mesh && !has_texture && !has_material {
+        return "Movies".to_string();
+    }
+    if has_ui && !has_skeletal_mesh && !has_static_mesh && !has_texture && !has_material {
+        return "UI".to_string();
+    }
+    
+    // For character mods, be more specific about what kind
+    if let Some(char_name) = character_name {
+        // Determine the sub-type (priority order)
+        if has_skeletal_mesh {
+            return format!("{} (Mesh)", char_name);
+        }
+        if has_static_mesh {
+            return format!("{} (Static Mesh)", char_name);
+        }
+        if has_material {
+            return format!("{} (VFX)", char_name);
+        }
+        // Retexture is lowest priority - only if nothing else matches
+        if has_texture {
+            return format!("{} (Retexture)", char_name);
+        }
+        // Mixed or just character
+        return char_name;
+    }
+    
+    // Standalone type detection (non-character mods) - priority order
+    if has_skeletal_mesh {
+        return "Mesh".to_string();
+    }
+    if has_static_mesh {
+        return "Static Mesh".to_string();
+    }
+    if has_material {
+        return "VFX".to_string();
+    }
+    if has_audio {
+        return "Audio".to_string();
+    }
+    // Retexture is lowest priority - only if nothing else matches
+    if has_texture {
+        return "Retexture".to_string();
     }
 
     fallback.unwrap_or_else(|| "Unknown".to_string())

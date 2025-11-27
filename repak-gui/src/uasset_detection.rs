@@ -1,27 +1,6 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::fs;
-use log::{debug, warn, error};
-use uasset_mesh_patch_rivals::{process_mesh_file, is_mesh_uasset};
-
-/// Detects if a UAsset file is a mesh using the integrated mesh patch library
-pub fn detect_mesh_with_toolkit(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    // Use the integrated uasset-mesh-patch-rivals library
-    match is_mesh_uasset(path) {
-        Ok(result) => Ok(result),
-        Err(_) => {
-            // Fallback to heuristic detection
-            Ok(is_mesh_uasset_heuristic(path))
-        }
-    }
-}
-
-/// Detects if a UAsset file is a texture using heuristic analysis
-pub fn detect_texture_with_toolkit(path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    // For now, use heuristic detection for textures
-    // TODO: Integrate UAssetAPI for proper texture detection
-    Ok(is_texture_uasset_heuristic(path))
-}
+use log::info;
 
 /// Heuristic detection for SKELETAL mesh UAsset files (NOT Static Meshes)
 /// This is for "Fix Mesh" which applies to SK_* files
@@ -96,74 +75,198 @@ use uasset_toolkit::{UAssetToolkit, UAssetToolkitSync};
 /// Detects SKELETAL mesh files in a list of mod contents using UAssetAPI (persistent process)
 /// Async version for use in Tauri commands
 pub async fn detect_mesh_files_async(mod_contents: &[String]) -> bool {
-    // Try to use UAssetToolkit with persistent process for batch scanning
+    use log::info;
+    
+    let uasset_files: Vec<String> = mod_contents.iter()
+        .filter(|f| f.to_lowercase().ends_with(".uasset"))
+        .cloned()
+        .collect();
+    info!("[Detection] Scanning {} uasset files for SkeletalMesh", uasset_files.len());
+    
+    if uasset_files.is_empty() {
+        return false;
+    }
+    
+    // Try batch detection first (much faster - single request for all files)
     if let Ok(toolkit) = UAssetToolkit::new(None) {
-        for file in mod_contents {
-            let path = PathBuf::from(file);
-            if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
-                if let Ok(true) = toolkit.is_skeletal_mesh_uasset(file).await {
-                    return true;
+        info!("[Detection] Using batch detection for SkeletalMesh");
+        match toolkit.batch_detect_skeletal_mesh(&uasset_files).await {
+            Ok(true) => {
+                info!("[Detection] FOUND SkeletalMesh (batch UAssetAPI)");
+                return true;
+            }
+            Ok(false) => {
+                info!("[Detection] No SkeletalMesh found via batch UAssetAPI");
+                return false;
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if !err_str.contains("File not found") {
+                    info!("[Detection] Batch detection error: {}", e);
                 }
             }
         }
-        return false;
     }
 
-    // Fallback to heuristic
-    mod_contents.iter().any(|file| {
+    // Fallback to heuristic detection (for PAK files where paths are virtual)
+    info!("[Detection] Using heuristic fallback for SkeletalMesh detection");
+    let result = mod_contents.iter().any(|file| {
         let path = PathBuf::from(file);
         if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
-            return is_mesh_uasset_heuristic(&path);
+            let is_mesh = is_mesh_uasset_heuristic(&path);
+            if is_mesh {
+                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+                info!("[Detection] FOUND SkeletalMesh (heuristic): {}", filename);
+            }
+            return is_mesh;
         }
         false
-    })
+    });
+    
+    if !result {
+        info!("[Detection] No SkeletalMesh found via heuristic in {} files", uasset_files.len());
+    }
+    result
 }
 
 /// Detects texture files in a list of mod contents using UAssetAPI (persistent process)
 /// Async version for use in Tauri commands
 pub async fn detect_texture_files_async(mod_contents: &[String]) -> bool {
-    // Try to use UAssetToolkit with persistent process for batch scanning
+    use log::info;
+    
+    let uasset_files: Vec<String> = mod_contents.iter()
+        .filter(|f| f.to_lowercase().ends_with(".uasset"))
+        .cloned()
+        .collect();
+    info!("[Detection] Scanning {} uasset files for Texture", uasset_files.len());
+    
+    // Check for raw image files first (always works, even for PAK paths)
+    for file in mod_contents {
+        let lower_file = file.to_lowercase();
+        if lower_file.ends_with(".png") ||
+           lower_file.ends_with(".jpg") ||
+           lower_file.ends_with(".jpeg") ||
+           lower_file.ends_with(".dds") ||
+           lower_file.ends_with(".tga") {
+            let path = PathBuf::from(file);
+            let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+            info!("[Detection] FOUND raw image file: {}", filename);
+            return true;
+        }
+    }
+    
+    if uasset_files.is_empty() {
+        return false;
+    }
+    
+    // Try batch detection first (much faster - single request for all files)
     if let Ok(toolkit) = UAssetToolkit::new(None) {
-        for file in mod_contents {
-            let lower_file = file.to_lowercase();
-            if lower_file.ends_with(".png") ||
-               lower_file.ends_with(".jpg") ||
-               lower_file.ends_with(".jpeg") ||
-               lower_file.ends_with(".dds") ||
-               lower_file.ends_with(".tga") {
+        info!("[Detection] Using batch detection for Texture");
+        match toolkit.batch_detect_texture(&uasset_files).await {
+            Ok(true) => {
+                info!("[Detection] FOUND Texture (batch UAssetAPI)");
                 return true;
             }
-            
-            if lower_file.ends_with(".uasset") {
-                if let Ok(true) = toolkit.is_texture_uasset(file).await {
-                    return true;
+            Ok(false) => {
+                info!("[Detection] No Texture found via batch UAssetAPI");
+                return false;
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if !err_str.contains("File not found") {
+                    info!("[Detection] Batch texture detection error: {}", e);
                 }
             }
         }
-        return false;
     }
 
-    // Fallback
-    detect_texture_files(mod_contents)
+    // Fallback to heuristic detection (for PAK files where paths are virtual)
+    info!("[Detection] Using heuristic fallback for Texture detection");
+    let result = mod_contents.iter().any(|file| {
+        let path = PathBuf::from(file);
+        if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+            let is_texture = is_texture_uasset_heuristic(&path);
+            if is_texture {
+                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+                info!("[Detection] FOUND Texture (heuristic): {}", filename);
+            }
+            return is_texture;
+        }
+        false
+    });
+    
+    if !result {
+        info!("[Detection] No Texture found via heuristic in {} files", uasset_files.len());
+    }
+    result
+}
+
+/// Heuristic detection for static mesh UAsset files
+pub fn is_static_mesh_uasset_heuristic(path: &Path) -> bool {
+    let file_name = path.file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    
+    // SM_* prefix is the standard UE naming convention for Static Meshes
+    file_name.starts_with("sm_")
 }
 
 /// Detects Static Mesh files in a list of mod contents using UAssetAPI (persistent process)
 /// Async version for use in Tauri commands
 pub async fn detect_static_mesh_files_async(mod_contents: &[String]) -> bool {
+    use log::info;
+    
+    let uasset_files: Vec<String> = mod_contents.iter()
+        .filter(|f| f.to_lowercase().ends_with(".uasset"))
+        .cloned()
+        .collect();
+    info!("[Detection] Scanning {} uasset files for StaticMesh", uasset_files.len());
+    
+    if uasset_files.is_empty() {
+        return false;
+    }
+    
+    // Try batch detection first (much faster - single request for all files)
     if let Ok(toolkit) = UAssetToolkit::new(None) {
-        for file in mod_contents {
-            let path = PathBuf::from(file);
-            if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
-                if let Ok(true) = toolkit.is_static_mesh_uasset(file).await {
-                    return true;
+        info!("[Detection] Using batch detection for StaticMesh");
+        match toolkit.batch_detect_static_mesh(&uasset_files).await {
+            Ok(true) => {
+                info!("[Detection] FOUND StaticMesh (batch UAssetAPI)");
+                return true;
+            }
+            Ok(false) => {
+                info!("[Detection] No StaticMesh found via batch UAssetAPI");
+                return false;
+            }
+            Err(e) => {
+                let err_str = e.to_string();
+                if !err_str.contains("File not found") {
+                    info!("[Detection] Batch static mesh detection error: {}", e);
                 }
             }
         }
-        return false;
     }
 
-    // Fallback
-    detect_static_mesh_files(mod_contents)
+    // Fallback to heuristic detection (for PAK files where paths are virtual)
+    info!("[Detection] Using heuristic fallback for StaticMesh detection");
+    let result = mod_contents.iter().any(|file| {
+        let path = PathBuf::from(file);
+        if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
+            let is_static = is_static_mesh_uasset_heuristic(&path);
+            if is_static {
+                let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("unknown");
+                info!("[Detection] FOUND StaticMesh (heuristic): {}", filename);
+            }
+            return is_static;
+        }
+        false
+    });
+    
+    if !result {
+        info!("[Detection] No StaticMesh found via heuristic in {} files", uasset_files.len());
+    }
+    result
 }
 
 /// Detects SKELETAL mesh files in a list of mod contents using UAssetAPI (persistent process)
@@ -183,6 +286,7 @@ pub fn detect_mesh_files(mod_contents: &[String]) -> bool {
     }
 
     // Fallback to heuristic if toolkit unavailable
+    /*
     mod_contents.iter().any(|file| {
         let path = PathBuf::from(file);
         if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
@@ -190,6 +294,8 @@ pub fn detect_mesh_files(mod_contents: &[String]) -> bool {
         }
         false
     })
+    */
+    false
 }
 
 /// Detects texture files in a list of mod contents using UAssetAPI (persistent process)
@@ -217,6 +323,7 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
     }
 
     // Fallback to heuristic
+    /*
     mod_contents.iter().any(|file| {
         let lower_file = file.to_lowercase();
         
@@ -237,134 +344,7 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
         
         false
     })
+    */
+    false
 }
 
-/// Detects Static Mesh files in a list of mod contents using UAssetAPI (persistent process)
-pub fn detect_static_mesh_files(mod_contents: &[String]) -> bool {
-    // Try to use UAssetToolkit with persistent process for batch scanning
-    if let Ok(toolkit) = UAssetToolkitSync::new(None) {
-        for file in mod_contents {
-            let path = PathBuf::from(file);
-            if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
-                if let Ok(true) = toolkit.is_static_mesh_uasset(file) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    // Fallback to heuristic
-    mod_contents.iter().any(|file| {
-        let path = PathBuf::from(file);
-        if path.extension().and_then(|e| e.to_str()) == Some("uasset") {
-            if let Some(filename) = path.file_name() {
-                let filename_str = filename.to_string_lossy().to_lowercase();
-                return filename_str.starts_with("sm_") && !filename_str.starts_with("sk_");
-            }
-        }
-        false
-    })
-}
-
-/// Patches mesh files using available tools
-pub fn patch_mesh_files(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), Box<dyn std::error::Error>> {
-    let uasset_files: Vec<_> = paths
-        .iter()
-        .filter(|p| {
-            p.extension().and_then(|ext| ext.to_str()) == Some("uasset") &&
-            is_mesh_uasset_heuristic(p)
-        })
-        .collect();
-
-    debug!("Found {} mesh files to patch", uasset_files.len());
-
-    // Process each mesh file
-    for uasset_file in &uasset_files {
-        let uexp_file = uasset_file.with_extension("uexp");
-        
-        if !uexp_file.exists() {
-            warn!("Missing .uexp file for mesh: {:?}", uasset_file);
-            continue;
-        }
-        
-        // Create backups
-        if let Err(e) = fs::copy(&uexp_file, format!("{}.bak", uexp_file.display())) {
-            warn!("Failed to create backup for {}: {}", uexp_file.display(), e);
-        }
-        if let Err(e) = fs::copy(uasset_file, format!("{}.bak", uasset_file.display())) {
-            warn!("Failed to create backup for {}: {}", uasset_file.display(), e);
-        }
-        
-        // Try to patch using the integrated library
-        if let Err(e) = patch_single_mesh_file(uasset_file, &uexp_file) {
-            error!("Failed to patch mesh file {:?}: {}", uasset_file, e);
-        } else {
-            debug!("Successfully patched mesh file: {:?}", uasset_file);
-        }
-    }
-    
-    Ok(())
-}
-
-/// Patches mesh files using UAssetAPI toolkit with fallback to integrated library
-pub fn patch_single_mesh_file(uasset_path: &Path, uexp_path: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    debug!("Patching mesh files: {:?} and {:?}", uasset_path, uexp_path);
-    
-    // Try UAssetAPI toolkit first
-    match crate::uasset_api_integration::process_mesh_with_uasset_api(uasset_path, uexp_path) {
-        Ok(true) => {
-            debug!("Successfully patched mesh files using UAssetAPI toolkit");
-            return Ok(());
-        }
-        Ok(false) => {
-            debug!("UAssetAPI toolkit not available, falling back to integrated library");
-        }
-        Err(e) => {
-            warn!("UAssetAPI toolkit mesh patching failed: {}", e);
-        }
-    }
-    
-    // Fallback to integrated mesh patch library
-    match process_mesh_file(uasset_path, uexp_path) {
-        Ok(()) => {
-            debug!("Successfully patched mesh files using integrated library");
-            Ok(())
-        }
-        Err(e) => {
-            error!("Mesh patching failed: {}", e);
-            Err(Box::new(e))
-        }
-    }
-}
-
-/// Modifies texture mipmaps using available tools
-pub fn modify_texture_mipmaps(uasset_path: &Path, uexp_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    // Try using uasset-mesh-patch-rivals for texture processing
-    let toolkit_paths = [
-        "./uasset-mesh-patch-rivals/target/release/uasset-mesh-patch-rivals.exe",
-        "./uasset-mesh-patch-rivals/target/debug/uasset-mesh-patch-rivals.exe",
-        "../uasset-mesh-patch-rivals/target/release/uasset-mesh-patch-rivals.exe",
-        "../uasset-mesh-patch-rivals/target/debug/uasset-mesh-patch-rivals.exe",
-    ];
-    
-    for toolkit_path in &toolkit_paths {
-        if std::path::Path::new(toolkit_path).exists() {
-            let output = Command::new(toolkit_path)
-                .arg("process-texture")
-                .arg(uasset_path)
-                .output();
-                
-            if let Ok(output) = output {
-                if output.status.success() {
-                    let output_str = String::from_utf8_lossy(&output.stdout);
-                    if output_str.contains("Texture detected and set to NoMipmaps") {
-                        return Ok(true);
-                    }
-                }
-            }
-        }
-    }
-    
-    Ok(false)
-}

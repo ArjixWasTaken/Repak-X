@@ -4,8 +4,9 @@ use std::sync::Arc;
 use retoc::{action_manifest, ActionManifest, Config, FGuid};
 use std::path::PathBuf;
 
-// Simplified file entry for Iced version
+// Simplified file entry for mod file table display
 #[derive(Clone, Debug)]
+#[allow(dead_code)] // Fields are read via file_table.rs
 pub struct UtocFileEntry {
     pub file_path: String,
     pub bulkdata_chunks: usize,

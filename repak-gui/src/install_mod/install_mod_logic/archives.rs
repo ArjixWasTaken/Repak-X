@@ -43,18 +43,3 @@ pub fn extract_rar(rar_path: &str, output_dir: &str) -> Result<(), unrar::error:
     }
     Ok(())
 }
-
-pub fn rar_length(rar_path: &str) -> Result<usize, unrar::error::UnrarError> {
-    let archive =
-        Archive::new(rar_path)
-            .open_for_listing()?;
-    let len = archive.into_iter().filter(|e| e.is_ok()).map(|e|e.unwrap()).collect::<Vec<_>>().len();
-    Ok(len)
-}
-
-
-pub fn zip_length(zip_path: &str) -> Result<usize, io::Error> {
-    let file = File::open(zip_path)?;
-    let archive = ZipArchive::new(file)?;
-    Ok(archive.len())
-}

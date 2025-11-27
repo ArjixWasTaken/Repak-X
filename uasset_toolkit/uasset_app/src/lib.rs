@@ -28,6 +28,13 @@ pub enum UAssetRequest {
     PatchMesh { file_path: String, uexp_path: String },
     #[serde(rename = "get_mesh_info")]
     GetMeshInfo { file_path: String },
+    // Batch detection - sends all files at once, returns first match
+    #[serde(rename = "batch_detect_skeletal_mesh")]
+    BatchDetectSkeletalMesh { file_paths: Vec<String> },
+    #[serde(rename = "batch_detect_static_mesh")]
+    BatchDetectStaticMesh { file_paths: Vec<String> },
+    #[serde(rename = "batch_detect_texture")]
+    BatchDetectTexture { file_paths: Vec<String> },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -117,6 +124,11 @@ impl UAssetToolkit {
             cmd.stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
+            
+            // Explicitly pass USMAP_PATH to child process
+            if let Ok(usmap_path) = std::env::var("USMAP_PATH") {
+                cmd.env("USMAP_PATH", &usmap_path);
+            }
             
             #[cfg(windows)]
             cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag on Windows
@@ -343,6 +355,57 @@ impl UAssetToolkit {
         }
     }
 
+    /// Batch detect skeletal meshes - sends all paths at once, returns true if any match
+    pub async fn batch_detect_skeletal_mesh(&self, file_paths: &[String]) -> Result<bool> {
+        let request = UAssetRequest::BatchDetectSkeletalMesh {
+            file_paths: file_paths.to_vec(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to batch detect skeletal mesh: {}", response.message);
+        }
+        
+        Ok(response.data
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false))
+    }
+
+    /// Batch detect static meshes - sends all paths at once, returns true if any match
+    pub async fn batch_detect_static_mesh(&self, file_paths: &[String]) -> Result<bool> {
+        let request = UAssetRequest::BatchDetectStaticMesh {
+            file_paths: file_paths.to_vec(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to batch detect static mesh: {}", response.message);
+        }
+        
+        Ok(response.data
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false))
+    }
+
+    /// Batch detect textures - sends all paths at once, returns true if any match
+    pub async fn batch_detect_texture(&self, file_paths: &[String]) -> Result<bool> {
+        let request = UAssetRequest::BatchDetectTexture {
+            file_paths: file_paths.to_vec(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to batch detect texture: {}", response.message);
+        }
+        
+        Ok(response.data
+            .and_then(|d| d.as_bool())
+            .unwrap_or(false))
+    }
+
     /// Batch process multiple uasset files
     /// Returns a vector of (file_path, was_processed, error_message)
     pub async fn batch_process_textures(&self, file_paths: &[String]) -> Vec<(String, bool, Option<String>)> {
@@ -360,55 +423,78 @@ impl UAssetToolkit {
 }
 
 /// Synchronous wrapper for common operations (blocks on tokio runtime)
+/// Handles both cases: when called from within an existing runtime (uses block_in_place)
+/// and when called from outside a runtime (creates its own)
 pub struct UAssetToolkitSync {
     toolkit: UAssetToolkit,
-    runtime: tokio::runtime::Runtime,
+    runtime: Option<tokio::runtime::Runtime>,
 }
 
 impl UAssetToolkitSync {
     pub fn new(bridge_path: Option<String>) -> Result<Self> {
         let toolkit = UAssetToolkit::new(bridge_path)?;
-        let runtime = tokio::runtime::Runtime::new()?;
+        
+        // Check if we're already inside a tokio runtime
+        let runtime = if tokio::runtime::Handle::try_current().is_ok() {
+            // Already in a runtime, don't create a new one
+            None
+        } else {
+            // Not in a runtime, create one
+            Some(tokio::runtime::Runtime::new()?)
+        };
+        
         Ok(Self { toolkit, runtime })
     }
 
+    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
+        if let Some(ref rt) = self.runtime {
+            // We have our own runtime, use it
+            rt.block_on(future)
+        } else {
+            // We're inside an existing runtime, use block_in_place
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(future)
+            })
+        }
+    }
+
     pub fn is_texture_uasset(&self, file_path: &str) -> Result<bool> {
-        self.runtime.block_on(self.toolkit.is_texture_uasset(file_path))
+        self.block_on(self.toolkit.is_texture_uasset(file_path))
     }
 
     pub fn is_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        self.runtime.block_on(self.toolkit.is_mesh_uasset(file_path))
+        self.block_on(self.toolkit.is_mesh_uasset(file_path))
     }
 
     pub fn is_skeletal_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        self.runtime.block_on(self.toolkit.is_skeletal_mesh_uasset(file_path))
+        self.block_on(self.toolkit.is_skeletal_mesh_uasset(file_path))
     }
 
     pub fn is_static_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        self.runtime.block_on(self.toolkit.is_static_mesh_uasset(file_path))
+        self.block_on(self.toolkit.is_static_mesh_uasset(file_path))
     }
 
     pub fn set_no_mipmaps(&self, file_path: &str) -> Result<()> {
-        self.runtime.block_on(self.toolkit.set_no_mipmaps(file_path))
+        self.block_on(self.toolkit.set_no_mipmaps(file_path))
     }
 
     pub fn patch_mesh(&self, file_path: &str, uexp_path: &str) -> Result<()> {
-        self.runtime.block_on(self.toolkit.patch_mesh(file_path, uexp_path))
+        self.block_on(self.toolkit.patch_mesh(file_path, uexp_path))
     }
 
     pub fn process_texture_uasset(&self, file_path: &str) -> Result<bool> {
-        self.runtime.block_on(self.toolkit.process_texture_uasset(file_path))
+        self.block_on(self.toolkit.process_texture_uasset(file_path))
     }
 
     pub fn process_mesh_uasset(&self, file_path: &str, uexp_path: &str) -> Result<bool> {
-        self.runtime.block_on(self.toolkit.process_mesh_uasset(file_path, uexp_path))
+        self.block_on(self.toolkit.process_mesh_uasset(file_path, uexp_path))
     }
 
     pub fn get_texture_info(&self, file_path: &str) -> Result<TextureInfo> {
-        self.runtime.block_on(self.toolkit.get_texture_info(file_path))
+        self.block_on(self.toolkit.get_texture_info(file_path))
     }
 
     pub fn get_mesh_info(&self, file_path: &str) -> Result<MeshInfo> {
-        self.runtime.block_on(self.toolkit.get_mesh_info(file_path))
+        self.block_on(self.toolkit.get_mesh_info(file_path))
     }
 }

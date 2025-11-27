@@ -1,7 +1,6 @@
 use crate::install_mod::install_mod_logic::pak_files::repak_dir;
 use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::{InstallableMod, AES_KEY};
-use crate::uasset_detection::{modify_texture_mipmaps, patch_mesh_files};
 use crate::uasset_api_integration::process_texture_with_uasset_api;
 use crate::utils::collect_files;
 use rayon::iter::IntoParallelRefIterator;
@@ -46,27 +45,24 @@ pub fn convert_to_iostore_directory(
     let mut paths = vec![];
     collect_files(&mut paths, &to_pak_dir)?;
 
-    // CRITICAL: Fix Static Mesh SerializeSize and SKIP IoStore conversion
-    // IoStore conversion (action_to_zen) rebuilds assets and overwrites SerializeSize fixes!
-    // Solution: Use regular .pak format to preserve fixes
+    // Static Mesh SerializeSize fix
     if pak.fix_serialsize_header {
         info!("╔══════════════════════════════════════════════════════════╗");
         info!("║  STATIC MESH SERIALIZESIZE FIX - STARTING                ║");
         info!("╚══════════════════════════════════════════════════════════╝");
         
-        // Check for usmap file (required for unversioned assets)
+        // Check for usmap file (required for unversioned assets) - stored in roaming folder
         let usmap_full_path = if !pak.usmap_path.is_empty() {
-            // Construct full path to Usmap folder
-            if let Some(exe_dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|p| p.to_path_buf())) {
-                let usmap_file = exe_dir.join("Usmap").join(&pak.usmap_path);
-                if usmap_file.exists() {
-                    Some(usmap_file.to_string_lossy().to_string())
-                } else {
-                    warn!("USmap file not found in Usmap folder: {}", pak.usmap_path);
-                    None
-                }
+            // Construct full path to Usmap folder in roaming directory
+            let usmap_dir = dirs::config_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join("RepakGuiRevamped")
+                .join("Usmap");
+            let usmap_file = usmap_dir.join(&pak.usmap_path);
+            if usmap_file.exists() {
+                Some(usmap_file.to_string_lossy().to_string())
             } else {
-                warn!("Could not determine executable directory for USmap");
+                warn!("USmap file not found in roaming folder: {}", usmap_file.display());
                 None
             }
         } else {
@@ -245,35 +241,65 @@ struct SerializeSizeFixResult {
     asset_type: Option<String>,
 }
 
-/// Detect asset type using UAssetAPI (no heuristics!)
-fn detect_asset_type_with_uasset_api(uasset_path: &Path, usmap_path: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
-    let tool_paths = [
-        "../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
-        "../../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
-        "./StaticMeshSerializeSizeFixer.exe",
-        "./tools/StaticMeshSerializeSizeFixer/StaticMeshSerializeSizeFixer.exe",
-    ];
-
-    let mut tool_path = None;
-    for path in &tool_paths {
-        if std::path::Path::new(path).exists() {
-            tool_path = Some(*path);
-            info!("   🔧 Found tool at: {}", path);
-            
-            // Get file metadata to check when it was last modified
-            if let Ok(metadata) = std::fs::metadata(path) {
-                if let Ok(modified) = metadata.modified() {
-                    info!("   📅 Tool last modified: {:?}", modified);
-                }
-                info!("   📏 Tool size: {} bytes", metadata.len());
+/// Find the StaticMeshSerializeSizeFixer tool - searches multiple locations
+fn find_static_mesh_fixer_tool() -> Result<PathBuf, Box<dyn std::error::Error>> {
+    // Try to find the tool relative to the executable first
+    if let Ok(exe_path) = std::env::current_exe() {
+        if let Some(exe_dir) = exe_path.parent() {
+            // Check next to executable (for release builds)
+            let next_to_exe = exe_dir.join("StaticMeshSerializeSizeFixer.exe");
+            if next_to_exe.exists() {
+                info!("   🔧 Found tool next to exe: {}", next_to_exe.display());
+                return Ok(next_to_exe);
             }
-            break;
+            
+            // Check in tools subdirectory
+            let in_tools = exe_dir.join("tools").join("StaticMeshSerializeSizeFixer.exe");
+            if in_tools.exists() {
+                info!("   🔧 Found tool in tools dir: {}", in_tools.display());
+                return Ok(in_tools);
+            }
         }
     }
+    
+    // Relative paths for development (from workspace root during tauri dev)
+    let relative_paths = [
+        // From workspace root (tauri dev runs from here)
+        "Repak_Gui-Revamped-TauriUpdate/UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/StaticMeshSerializeSizeFixer.exe",
+        "Repak_Gui-Revamped-TauriUpdate/UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
+        // From repak-gui directory
+        "../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/StaticMeshSerializeSizeFixer.exe",
+        "../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
+        // Legacy paths
+        "../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/StaticMeshSerializeSizeFixer.exe",
+        "../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
+        // UAssetAPI in same directory structure
+        "UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/StaticMeshSerializeSizeFixer.exe",
+        "UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
+    ];
+    
+    for path in &relative_paths {
+        let p = Path::new(path);
+        if p.exists() {
+            info!("   🔧 Found tool at: {}", path);
+            return Ok(p.to_path_buf());
+        }
+    }
+    
+    // Log current working directory to help debug
+    if let Ok(cwd) = std::env::current_dir() {
+        warn!("   Current working directory: {}", cwd.display());
+    }
+    
+    Err("StaticMeshSerializeSizeFixer.exe not found in any search path. Make sure it's built with 'dotnet publish'.".into())
+}
 
-    let tool_path = tool_path.ok_or("StaticMeshSerializeSizeFixer.exe not found in any search path")?;
+/// Detect asset type using UAssetAPI (no heuristics!)
+fn detect_asset_type_with_uasset_api(uasset_path: &Path, usmap_path: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
+    // Get the tool path - try multiple locations
+    let tool_path = find_static_mesh_fixer_tool()?;
 
-    let mut cmd = Command::new(tool_path);
+    let mut cmd = Command::new(&tool_path);
     
     // Hide CMD window on Windows (CREATE_NO_WINDOW flag)
     #[cfg(windows)]
@@ -284,9 +310,9 @@ fn detect_asset_type_with_uasset_api(uasset_path: &Path, usmap_path: Option<&str
     // Add usmap path if provided
     if let Some(usmap) = usmap_path {
         cmd.arg(usmap);
-        debug!("   Running: {} detect {:?} {}", tool_path, uasset_path, usmap);
+        debug!("   Running: {} detect {:?} {}", tool_path.display(), uasset_path, usmap);
     } else {
-        debug!("   Running: {} detect {:?}", tool_path, uasset_path);
+        debug!("   Running: {} detect {:?}", tool_path.display(), uasset_path);
     }
     
     let output = cmd.output()?;
@@ -318,24 +344,9 @@ fn detect_asset_type_with_uasset_api(uasset_path: &Path, usmap_path: Option<&str
 
 /// Fix SerializeSize for Static Meshes using UAssetAPI (calculation only) + binary patching
 fn fix_static_mesh_serializesize(uasset_path: &Path, usmap_path: Option<&str>) -> Result<usize, Box<dyn std::error::Error>> {
-    let tool_paths = [
-        "../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
-        "../../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/StaticMeshSerializeSizeFixer.exe",
-        "./StaticMeshSerializeSizeFixer.exe",
-        "./tools/StaticMeshSerializeSizeFixer/StaticMeshSerializeSizeFixer.exe",
-    ];
+    let tool_path = find_static_mesh_fixer_tool()?;
 
-    let mut tool_path = None;
-    for path in &tool_paths {
-        if std::path::Path::new(path).exists() {
-            tool_path = Some(*path);
-            break;
-        }
-    }
-
-    let tool_path = tool_path.ok_or("StaticMeshSerializeSizeFixer.exe not found")?;
-
-    let mut cmd = Command::new(tool_path);
+    let mut cmd = Command::new(&tool_path);
     
     // Hide CMD window on Windows (CREATE_NO_WINDOW flag)
     #[cfg(windows)]
@@ -379,9 +390,9 @@ fn fix_static_mesh_serializesize(uasset_path: &Path, usmap_path: Option<&str>) -
         return Ok(0);
     }
 
-    // CRITICAL: Apply binary patches at exact byte offsets
-    // This preserves file structure that retoc expects (unlike UAssetAPI's Write())
-    info!("   Applying binary patches at exact byte offsets...");
+    // Apply binary patches to the .uasset header ONLY
+    // The C# tool calculates correct sizes from .uexp, Rust patches the .uasset header
+    info!("   Applying binary patches to .uasset header...");
     let fixes_json: serde_json::Value = serde_json::from_str(&stdout)?;
     if let Some(fixes_array) = fixes_json.get("fixes").and_then(|f| f.as_array()) {
         for fix in fixes_array {
@@ -397,8 +408,6 @@ fn fix_static_mesh_serializesize(uasset_path: &Path, usmap_path: Option<&str>) -
 /// Apply a binary patch to replace old SerializeSize with new SerializeSize
 /// This preserves the exact file structure that retoc expects
 fn apply_binary_patch(uasset_path: &Path, old_size: i64, new_size: i64) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::{Seek, SeekFrom, Write};
-    
     // Read the entire file
     let mut uasset_data = std::fs::read(uasset_path)?;
     
@@ -428,70 +437,42 @@ fn apply_binary_patch(uasset_path: &Path, old_size: i64, new_size: i64) -> Resul
     Ok(())
 }
 
-/// Process all Static Mesh files in a directory and fix their SerializeSize
+/// Process all .uasset files in a directory - re-serialize with UAssetAPI (like UAssetGUI)
+/// This fixes SerializeSize automatically for all asset types
 fn process_static_mesh_serializesize(dir: &Path, usmap_path: Option<&str>) -> Result<usize, Box<dyn std::error::Error>> {
     let mut total_fixed = 0;
-    let mut static_mesh_files = Vec::new();
+    let mut uasset_files = Vec::new();
 
     // Collect all .uasset files
-    collect_uasset_files(dir, &mut static_mesh_files)?;
+    collect_uasset_files(dir, &mut uasset_files)?;
 
-    info!("📁 Found {} .uasset files to check in: {:?}", static_mesh_files.len(), dir);
+    info!("📁 Found {} .uasset files to process in: {:?}", uasset_files.len(), dir);
     
     if let Some(usmap) = usmap_path {
         info!("🗺️  Using USmap file: {}", usmap);
     } else {
-        warn!("⚠️  No USmap file provided - detection may fail for unversioned assets!");
+        warn!("⚠️  No USmap file provided - processing may fail for unversioned assets!");
+        return Ok(0);
     }
 
-    let mut detected_types = std::collections::HashMap::new();
-
-    // Detect and process only Static Meshes using UAssetAPI (NO HEURISTICS!)
-    for uasset_file in &static_mesh_files {
+    // Process ALL .uasset files (like UAssetGUI does - no detection needed)
+    // Re-serializing with UAssetAPI automatically fixes SerializeSize
+    for uasset_file in &uasset_files {
         let filename = uasset_file.file_name().unwrap_or_default().to_string_lossy();
-        info!("🔍 Checking: {}", filename);
+        info!("🔧 Processing: {}", filename);
         
-        // Use UAssetAPI to accurately detect asset type
-        match detect_asset_type_with_uasset_api(uasset_file, usmap_path) {
-            Ok(asset_type) => {
-                *detected_types.entry(asset_type.clone()).or_insert(0) += 1;
-                info!("   → Detected as: {}", asset_type);
-                
-                // ONLY process if it's a Static Mesh
-                // NOT Skeletal Meshes (SK_*)
-                // NOT Material Instances (MI_*)
-                if asset_type == "static_mesh" {
-                    info!("   ✅ Is Static Mesh - Processing...");
-                    
-                    match fix_static_mesh_serializesize(uasset_file, usmap_path) {
-                        Ok(count) => {
-                            total_fixed += count;
-                            if count > 0 {
-                                info!("   ✓ Fixed {} export(s)", count);
-                            } else {
-                                info!("   → No SerializeSize fixes needed for this mesh");
-                            }
-                        }
-                        Err(e) => {
-                            warn!("   ✗ Failed to fix: {}", e);
-                        }
-                    }
-                } else {
-                    info!("   ⏭️  Skipping (not a Static Mesh)");
-                }
+        match fix_static_mesh_serializesize(uasset_file, usmap_path) {
+            Ok(count) => {
+                total_fixed += count;
+                info!("   ✓ Re-serialized ({} exports)", count);
             }
             Err(e) => {
-                warn!("   ❌ Could not detect asset type: {}", e);
+                warn!("   ✗ Failed to process: {}", e);
             }
         }
     }
 
-    // Summary
-    info!("📊 Detection Summary:");
-    for (asset_type, count) in detected_types.iter() {
-        info!("   - {}: {} file(s)", asset_type, count);
-    }
-    info!("🔧 Total SerializeSize fixes applied: {}", total_fixed);
+    info!("📊 Total files processed: {}", total_fixed);
 
     Ok(total_fixed)
 }

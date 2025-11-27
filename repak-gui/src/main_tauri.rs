@@ -8,9 +8,10 @@ mod uasset_detection;
 mod uasset_api_integration;
 mod utils;
 mod utoc_utils;
+mod character_data;
 
-use install_mod::InstallableMod;
-use log::{info, error};
+use uasset_detection::{detect_mesh_files_async, detect_texture_files_async, detect_static_mesh_files_async};
+use log::{info, warn, error};
 use serde::{Deserialize, Serialize};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::fs::File;
@@ -340,13 +341,42 @@ struct InstallableModInfo {
 }
 
 #[tauri::command]
-async fn parse_dropped_files(paths: Vec<String>) -> Result<Vec<InstallableModInfo>, String> {
+async fn parse_dropped_files(
+    paths: Vec<String>,
+    state: State<'_, Arc<Mutex<AppState>>>,
+    window: Window
+) -> Result<Vec<InstallableModInfo>, String> {
     use crate::utils::get_current_pak_characteristics;
     use repak::PakBuilder;
     use repak::utils::AesKey;
     use std::str::FromStr;
     use std::fs::File;
     use std::io::BufReader;
+    
+    // Emit start detection log
+    let _ = window.emit("install_log", "[Detection] Starting UAssetAPI detection...");
+    
+    // Set USMAP_PATH for detection (from roaming folder)
+    {
+        let state_guard = state.lock().unwrap();
+        let usmap_filename = state_guard.usmap_path.clone();
+        
+        if !usmap_filename.is_empty() {
+            if let Some(usmap_full_path) = get_usmap_full_path(&usmap_filename) {
+                std::env::set_var("USMAP_PATH", &usmap_full_path);
+                let msg = format!("[Detection] Set USMAP_PATH: {}", usmap_full_path.display());
+                info!("{}", msg);
+                let _ = window.emit("install_log", &msg);
+            } else {
+                let expected_path = usmap_dir().join(&usmap_filename);
+                let msg = format!("[Detection] WARNING: USMAP not found at: {}", expected_path.display());
+                info!("{}", msg);
+                let _ = window.emit("install_log", &msg);
+            }
+        } else {
+            let _ = window.emit("install_log", "[Detection] WARNING: No USMAP configured in settings");
+        }
+    }
     
     let mut mods = Vec::new();
     
@@ -375,12 +405,24 @@ async fn parse_dropped_files(paths: Vec<String>) -> Result<Vec<InstallableModInf
                 let mod_type = get_current_pak_characteristics(files.clone());
                 
                 // Auto-detect mesh and texture files
-                let has_skeletal_mesh = detect_mesh_files_async(&files).await;
-                let has_static_mesh = detect_static_mesh_files_async(&files).await;
-                let has_texture = detect_texture_files_async(&files).await;
+                let _ = window.emit("install_log", format!("[Detection] Analyzing directory: {} ({} files)", mod_name, files.len()));
                 
-                info!("Auto-detection for directory {}: skeletal={}, static={}, texture={}", 
+                let _ = window.emit("install_log", "[Detection] Checking for SkeletalMesh assets...");
+                let has_skeletal_mesh = detect_mesh_files_async(&files).await;
+                let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
+                
+                let _ = window.emit("install_log", "[Detection] Checking for StaticMesh assets...");
+                let has_static_mesh = detect_static_mesh_files_async(&files).await;
+                let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
+                
+                let _ = window.emit("install_log", "[Detection] Checking for Texture assets...");
+                let has_texture = detect_texture_files_async(&files).await;
+                let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
+                
+                let summary = format!("[Detection] Results for {}: skeletal={}, static={}, texture={}", 
                       mod_name, has_skeletal_mesh, has_static_mesh, has_texture);
+                info!("{}", summary);
+                let _ = window.emit("install_log", &summary);
                 
                 (mod_type, has_skeletal_mesh, has_texture, has_static_mesh)
             } else {
@@ -396,13 +438,114 @@ async fn parse_dropped_files(paths: Vec<String>) -> Result<Vec<InstallableModInf
                         let files: Vec<String> = pak.files();
                         let mod_type = get_current_pak_characteristics(files.clone());
                         
-                        // Auto-detect mesh and texture files
-                        let has_skeletal_mesh = detect_mesh_files_async(&files).await;
-                        let has_static_mesh = detect_static_mesh_files_async(&files).await;
-                        let has_texture = detect_texture_files_async(&files).await;
+                        // Get uasset files for extraction (also extract matching .uexp files)
+                        let uasset_files: Vec<&String> = files.iter()
+                            .filter(|f| f.to_lowercase().ends_with(".uasset"))
+                            .collect();
                         
-                        info!("Auto-detection for {}: skeletal={}, static={}, texture={}", 
+                        // Also get .uexp files (needed by UAssetAPI for export data)
+                        let files_to_extract: Vec<&String> = files.iter()
+                            .filter(|f| {
+                                let lower = f.to_lowercase();
+                                lower.ends_with(".uasset") || lower.ends_with(".uexp")
+                            })
+                            .collect();
+                        
+                        let _ = window.emit("install_log", format!("[Detection] Analyzing PAK: {} ({} total, {} uasset, {} to extract)", mod_name, files.len(), uasset_files.len(), files_to_extract.len()));
+                        
+                        // Extract uasset files to temp for accurate UAssetAPI detection
+                        let mut extracted_paths: Vec<String> = Vec::new();
+                        let temp_dir = tempfile::tempdir().ok();
+                        
+                        if let Some(ref temp) = temp_dir {
+                            let _ = window.emit("install_log", "[Detection] Extracting uassets for analysis (parallel)...");
+                            
+                            use rayon::prelude::*;
+                            use std::sync::atomic::{AtomicUsize, Ordering};
+                            
+                            let temp_path = temp.path().to_path_buf();
+                            let pak_path = path.clone();
+                            let extracted_count = AtomicUsize::new(0);
+                            
+                            // Parallel extraction using rayon - extract both .uasset and .uexp files
+                            let results: Vec<Option<String>> = files_to_extract.par_iter().map(|internal_path| {
+                                // Each thread opens its own file handle
+                                let file = match File::open(&pak_path) {
+                                    Ok(f) => f,
+                                    Err(_) => return None,
+                                };
+                                let mut reader = BufReader::new(file);
+                                
+                                let aes = match AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74") {
+                                    Ok(k) => k,
+                                    Err(_) => return None,
+                                };
+                                
+                                let pak = match PakBuilder::new().key(aes.0).reader(&mut reader) {
+                                    Ok(p) => p,
+                                    Err(_) => return None,
+                                };
+                                
+                                let dest_path = temp_path.join(internal_path);
+                                
+                                // Create parent directories
+                                if let Some(parent) = dest_path.parent() {
+                                    let _ = std::fs::create_dir_all(parent);
+                                }
+                                
+                                // Re-open for extraction
+                                let extract_file = match File::open(&pak_path) {
+                                    Ok(f) => f,
+                                    Err(_) => return None,
+                                };
+                                let mut extract_reader = BufReader::new(extract_file);
+                                
+                                if let Ok(data) = pak.get(internal_path, &mut extract_reader) {
+                                    if let Ok(mut out_file) = File::create(&dest_path) {
+                                        use std::io::Write;
+                                        if out_file.write_all(&data).is_ok() {
+                                            extracted_count.fetch_add(1, Ordering::Relaxed);
+                                            return Some(dest_path.to_string_lossy().to_string());
+                                        }
+                                    }
+                                }
+                                None
+                            }).collect();
+                            
+                            // Filter to only .uasset paths for detection (uexp files are extracted but not detected)
+                            extracted_paths = results.into_iter().flatten()
+                                .filter(|p| p.to_lowercase().ends_with(".uasset"))
+                                .collect();
+                            
+                            let _ = window.emit("install_log", format!("[Detection] Extracted {} uasset files for UAssetAPI analysis", extracted_paths.len()));
+                        }
+                        
+                        // Use extracted paths if available, otherwise fall back to internal paths (for heuristic)
+                        let detection_files = if !extracted_paths.is_empty() {
+                            extracted_paths.clone()
+                        } else {
+                            files.clone()
+                        };
+                        
+                        let _ = window.emit("install_log", "[Detection] Checking for SkeletalMesh assets...");
+                        let has_skeletal_mesh = detect_mesh_files_async(&detection_files).await;
+                        let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
+                        
+                        let _ = window.emit("install_log", "[Detection] Checking for StaticMesh assets...");
+                        let has_static_mesh = detect_static_mesh_files_async(&detection_files).await;
+                        let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
+                        
+                        let _ = window.emit("install_log", "[Detection] Checking for Texture assets...");
+                        let has_texture = detect_texture_files_async(&detection_files).await;
+                        let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
+                        
+                        // Temp dir auto-cleans up when dropped
+                        drop(temp_dir);
+                        
+                        let summary = format!("[Detection] Results for {}: skeletal={}, static={}, texture={}", 
                               mod_name, has_skeletal_mesh, has_static_mesh, has_texture);
+                        info!("{}", summary);
+                        let _ = window.emit("install_log", &summary);
                         
                         (mod_type, has_skeletal_mesh, has_texture, has_static_mesh)
                     } else {
@@ -457,33 +600,28 @@ async fn install_mods(
     window: Window,
     state: State<'_, Arc<Mutex<AppState>>>,
 ) -> Result<(), String> {
-    use crate::install_mod::{InstallableMod, ModInstallRequest};
     use std::sync::atomic::{AtomicI32, AtomicBool};
     use std::sync::Arc as StdArc;
     
     let state_guard = state.lock().unwrap();
     let mod_directory = state_guard.game_path.clone();
-    let usmap_path = state_guard.usmap_path.clone();
+    let usmap_filename = state_guard.usmap_path.clone();
     drop(state_guard);
 
-    // Propagate USMAP path to UAssetBridge via environment for UAssetAPI-based processing
-    if !usmap_path.is_empty() {
-        if let Ok(exe_path) = std::env::current_exe() {
-            if let Some(exe_dir) = exe_path.parent() {
-                let usmap_full_path = exe_dir.join("Usmap").join(&usmap_path);
-                if usmap_full_path.exists() {
-                    std::env::set_var("USMAP_PATH", &usmap_full_path);
-                    info!(
-                        "Set USMAP_PATH for UAssetBridge: {}",
-                        usmap_full_path.display()
-                    );
-                } else {
-                    error!(
-                        "USMAP file not found at expected path for UAssetBridge: {}",
-                        usmap_full_path.display()
-                    );
-                }
-            }
+    // Propagate USMAP path to UAssetBridge via environment for UAssetAPI-based processing (from roaming folder)
+    if !usmap_filename.is_empty() {
+        if let Some(usmap_full_path) = get_usmap_full_path(&usmap_filename) {
+            std::env::set_var("USMAP_PATH", &usmap_full_path);
+            info!(
+                "Set USMAP_PATH for UAssetBridge: {}",
+                usmap_full_path.display()
+            );
+        } else {
+            let expected_path = usmap_dir().join(&usmap_filename);
+            error!(
+                "USMAP file not found at expected path for UAssetBridge: {}",
+                expected_path.display()
+            );
         }
     }
 
@@ -513,7 +651,7 @@ async fn install_mods(
             installable.fix_textures = mod_to_install.fix_texture;
             installable.fix_serialsize_header = mod_to_install.fix_serialize_size;
             installable.repak = mod_to_install.to_repak;
-            installable.usmap_path = usmap_path.clone();
+            installable.usmap_path = usmap_filename.clone();
         }
     }
 
@@ -523,7 +661,7 @@ async fn install_mods(
     
     let total = installable_mods.len() as i32;
     let counter_clone = installed_counter.clone();
-    let stop_clone = stop_flag.clone();
+    let _stop_clone = stop_flag.clone();
     let window_clone = window.clone();
     
     // Spawn installation thread
@@ -649,7 +787,7 @@ async fn get_folders(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<ModFo
                 .to_string();
             
             // Count mods in this folder
-            let mod_count = WalkDir::new(&path)
+            let _mod_count = WalkDir::new(&path)
                 .max_depth(1)
                 .into_iter()
                 .filter_map(|e| e.ok())
@@ -780,6 +918,18 @@ async fn add_custom_tag(
     Ok(())
 }
 
+/// Copy a USMAP file to the roaming folder, replacing any existing USMAP files.
+/// 
+/// # Arguments
+/// * `source_path` - Full path to the source .usmap file
+/// 
+/// # Returns
+/// The filename of the copied USMAP file (just the name, not full path)
+/// 
+/// # Behavior
+/// - Deletes ALL existing .usmap files in the roaming Usmap folder before copying
+/// - Copies the new file to `%APPDATA%/RepakGuiRevamped/Usmap/`
+/// - Only one USMAP file should exist at a time
 #[tauri::command]
 async fn copy_usmap_to_folder(source_path: String) -> Result<String, String> {
     let source = PathBuf::from(&source_path);
@@ -788,33 +938,150 @@ async fn copy_usmap_to_folder(source_path: String) -> Result<String, String> {
         return Err("Source file does not exist".to_string());
     }
     
-    // Get exe directory
-    let exe_dir = std::env::current_exe()
-        .map_err(|e| format!("Failed to get exe path: {}", e))?
-        .parent()
-        .ok_or("Failed to get exe directory")?
-        .to_path_buf();
-    
-    // Create Usmap/ folder
-    let usmap_dir = exe_dir.join("Usmap");
-    std::fs::create_dir_all(&usmap_dir)
+    // Get the Usmap directory in roaming folder
+    let usmap_folder = usmap_dir();
+    std::fs::create_dir_all(&usmap_folder)
         .map_err(|e| format!("Failed to create Usmap directory: {}", e))?;
+    
+    // Delete all existing .usmap files in the folder
+    if let Ok(entries) = std::fs::read_dir(&usmap_folder) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) == Some("usmap") {
+                if let Err(e) = std::fs::remove_file(&path) {
+                    warn!("Failed to delete old USMAP file {:?}: {}", path, e);
+                } else {
+                    info!("Deleted old USMAP file: {:?}", path);
+                }
+            }
+        }
+    }
     
     // Get filename from source
     let filename = source.file_name()
-        .ok_or("Invalid filename")?
+        .ok_or("Invalid source filename")?
         .to_str()
         .ok_or("Invalid UTF-8 in filename")?;
     
-    // Copy file to Usmap/ folder
-    let dest_path = usmap_dir.join(filename);
+    // Copy file to Usmap/ folder in roaming
+    let dest_path = usmap_folder.join(filename);
     std::fs::copy(&source, &dest_path)
         .map_err(|e| format!("Failed to copy file: {}", e))?;
     
-    info!("Copied USmap file {} to Usmap folder", filename);
+    info!("Copied USmap file {} to {}", filename, usmap_folder.display());
     
     // Return just the filename
     Ok(filename.to_string())
+}
+
+#[tauri::command]
+async fn set_usmap_path(usmap_path: String, state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), String> {
+    let mut state = state.lock().unwrap();
+    state.usmap_path = usmap_path.clone();
+    info!("Set USMAP path in AppState: {}", usmap_path);
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_usmap_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
+    let state = state.lock().unwrap();
+    Ok(state.usmap_path.clone())
+}
+
+/// Get the USMAP directory path in the roaming folder.
+/// 
+/// # Returns
+/// Full path to `%APPDATA%/RepakGuiRevamped/Usmap/`
+#[tauri::command]
+async fn get_usmap_dir_path() -> Result<String, String> {
+    Ok(usmap_dir().to_string_lossy().to_string())
+}
+
+/// List all USMAP files currently in the roaming Usmap folder.
+/// Reads from filesystem at runtime, not from saved state.
+/// 
+/// # Returns
+/// Vector of filenames (not full paths) of .usmap files in the folder
+#[tauri::command]
+async fn list_usmap_files() -> Result<Vec<String>, String> {
+    let usmap_folder = usmap_dir();
+    
+    if !usmap_folder.exists() {
+        return Ok(Vec::new());
+    }
+    
+    let entries = std::fs::read_dir(&usmap_folder)
+        .map_err(|e| format!("Failed to read Usmap directory: {}", e))?;
+    
+    let mut files = Vec::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("usmap") {
+            if let Some(filename) = path.file_name().and_then(|s| s.to_str()) {
+                files.push(filename.to_string());
+            }
+        }
+    }
+    
+    Ok(files)
+}
+
+/// Get the currently active USMAP file by reading from filesystem.
+/// This reads the actual files in the Usmap folder, not the saved state.
+/// 
+/// # Returns
+/// - Filename of the first .usmap file found (there should only be one)
+/// - Empty string if no .usmap files exist
+#[tauri::command]
+async fn get_current_usmap_file() -> Result<String, String> {
+    let files = list_usmap_files().await?;
+    Ok(files.into_iter().next().unwrap_or_default())
+}
+
+/// Get the full path to the currently active USMAP file.
+/// 
+/// # Returns
+/// - Full path to the .usmap file if one exists
+/// - Empty string if no .usmap file exists
+#[tauri::command]
+async fn get_current_usmap_full_path() -> Result<String, String> {
+    let files = list_usmap_files().await?;
+    if let Some(filename) = files.into_iter().next() {
+        let full_path = usmap_dir().join(&filename);
+        Ok(full_path.to_string_lossy().to_string())
+    } else {
+        Ok(String::new())
+    }
+}
+
+/// Delete the currently active USMAP file from the roaming folder.
+/// 
+/// # Returns
+/// - `true` if a file was deleted
+/// - `false` if no file existed to delete
+#[tauri::command]
+async fn delete_current_usmap() -> Result<bool, String> {
+    let usmap_folder = usmap_dir();
+    
+    if !usmap_folder.exists() {
+        return Ok(false);
+    }
+    
+    let entries = std::fs::read_dir(&usmap_folder)
+        .map_err(|e| format!("Failed to read Usmap directory: {}", e))?;
+    
+    let mut deleted = false;
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) == Some("usmap") {
+            std::fs::remove_file(&path)
+                .map_err(|e| format!("Failed to delete USMAP file: {}", e))?;
+            info!("Deleted USMAP file: {:?}", path);
+            deleted = true;
+        }
+    }
+    
+    Ok(deleted)
 }
 
 #[tauri::command]
@@ -988,6 +1255,56 @@ struct UpdateInfo {
 }
 
 // ============================================================================
+// CHARACTER DATA COMMANDS
+// ============================================================================
+
+#[tauri::command]
+async fn get_character_data() -> Result<Vec<character_data::CharacterSkin>, String> {
+    Ok(character_data::get_all_character_data())
+}
+
+#[tauri::command]
+async fn get_character_by_skin_id(skin_id: String) -> Result<Option<character_data::CharacterSkin>, String> {
+    Ok(character_data::get_character_by_skin_id(&skin_id))
+}
+
+#[tauri::command]
+async fn update_character_data_from_rivalskins(window: Window) -> Result<usize, String> {
+    let _ = window.emit("character_update_log", "Starting rivalskins.com data fetch...");
+    
+    match character_data::update_from_rivalskins().await {
+        Ok(new_count) => {
+            let msg = format!("Successfully updated character data. {} new skins added.", new_count);
+            let _ = window.emit("character_update_log", &msg);
+            info!("{}", msg);
+            Ok(new_count)
+        }
+        Err(e) => {
+            let msg = format!("Failed to update character data: {}", e);
+            let _ = window.emit("character_update_log", &msg);
+            error!("{}", msg);
+            Err(e)
+        }
+    }
+}
+
+#[tauri::command]
+async fn identify_mod_character(file_paths: Vec<String>) -> Result<Option<(String, String)>, String> {
+    Ok(character_data::identify_mod_from_paths(&file_paths))
+}
+
+#[tauri::command]
+async fn get_character_data_path() -> Result<String, String> {
+    Ok(character_data::character_data_path().to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn refresh_character_cache() -> Result<(), String> {
+    character_data::refresh_cache();
+    Ok(())
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
@@ -995,6 +1312,25 @@ fn app_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join("RepakGuiRevamped")
+}
+
+/// Directory for USMAP files - stored in roaming folder
+fn usmap_dir() -> PathBuf {
+    app_dir().join("Usmap")
+}
+
+/// Get the full path to a USMAP file by filename
+fn get_usmap_full_path(usmap_filename: &str) -> Option<PathBuf> {
+    if usmap_filename.is_empty() {
+        return None;
+    }
+    
+    let usmap_path = usmap_dir().join(usmap_filename);
+    if usmap_path.exists() {
+        Some(usmap_path)
+    } else {
+        None
+    }
 }
 
 /// Directory for log files - placed next to the executable for easy access
@@ -1165,11 +1501,6 @@ async fn get_mod_details(mod_path: String) -> Result<ModDetails, String> {
     })
 }
 
-fn determine_mod_type(files: &[String]) -> String {
-    use crate::utils::get_current_pak_characteristics;
-    get_current_pak_characteristics(files.to_vec())
-}
-
 // ============================================================================
 // MAIN
 // ============================================================================
@@ -1217,7 +1548,15 @@ fn main() {
             delete_folder,
             assign_mod_to_folder,
             add_custom_tag,
+            // USMAP management commands
             copy_usmap_to_folder,
+            set_usmap_path,
+            get_usmap_path,
+            get_usmap_dir_path,
+            list_usmap_files,
+            get_current_usmap_file,
+            get_current_usmap_full_path,
+            delete_current_usmap,
             get_all_tags,
             toggle_mod,
             check_game_running,
@@ -1225,7 +1564,14 @@ fn main() {
             check_for_updates,
             get_mod_details,
             set_mod_priority,
-            extract_pak_to_destination
+            extract_pak_to_destination,
+            // Character data commands
+            get_character_data,
+            get_character_by_skin_id,
+            update_character_data_from_rivalskins,
+            identify_mod_character,
+            get_character_data_path,
+            refresh_character_cache
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
