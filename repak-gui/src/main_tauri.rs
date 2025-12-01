@@ -745,9 +745,31 @@ async fn install_mods(
 
 #[tauri::command]
 async fn delete_mod(path: String) -> Result<(), String> {
-    let path = PathBuf::from(path);
-    std::fs::remove_file(&path)
-        .map_err(|e| format!("Failed to delete mod: {}", e))?;
+    let path_buf = PathBuf::from(&path);
+    
+    // Try to delete the main file
+    if path_buf.exists() {
+        std::fs::remove_file(&path_buf)
+            .map_err(|e| format!("Failed to delete mod file: {}", e))?;
+    }
+
+    // If it's a .pak file, try to delete associated IOStore files
+    if let Some(extension) = path_buf.extension() {
+        if extension.to_string_lossy().to_lowercase() == "pak" {
+            // We need to handle the case where the file name might have multiple dots, 
+            // but with_extension replaces the last one, which is what we want for .pak -> .ucas
+            let ucas_path = path_buf.with_extension("ucas");
+            if ucas_path.exists() {
+                let _ = std::fs::remove_file(ucas_path);
+            }
+            
+            let utoc_path = path_buf.with_extension("utoc");
+            if utoc_path.exists() {
+                let _ = std::fs::remove_file(utoc_path);
+            }
+        }
+    }
+    
     Ok(())
 }
 
