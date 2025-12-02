@@ -444,17 +444,27 @@ impl UnifiedP2PManager {
         let (peer_id, addresses) = {
             let network = self.network.lock();
             let peer_id = network.local_peer_id();
-            let mut addrs = network.listening_addresses();
+            let listening = network.listening_addresses();
             let external = network.external_addresses();
-            info!("Listening addresses: {:?}", addrs);
+            let relay = network.relay_addresses();
+            info!("Listening addresses: {:?}", listening);
             info!("External addresses: {:?}", external);
-            addrs.extend(external);
+            info!("Relay addresses: {:?}", relay);
+            
+            // Use all_addresses() to get listening + external + relay circuit addresses
+            let addrs = network.all_addresses();
             (peer_id, addrs)
         };
 
         info!("Total addresses for share: {}", addresses.len());
         for (i, addr) in addresses.iter().enumerate() {
             info!("  Address {}: {}", i+1, addr);
+        }
+        
+        if addresses.is_empty() {
+            warn!("No addresses available! Network may not be fully initialized.");
+            warn!("Consider waiting a few seconds after starting the network before creating shares.");
+            warn!("Peers will still be able to connect via DHT discovery.");
         }
 
         // Create share info
@@ -557,26 +567,36 @@ impl UnifiedP2PManager {
         info!("Attempting to connect to peer...");
         if let Ok(peer_id) = share_info.peer_id.parse::<PeerId>() {
             info!("Parsed peer ID: {}", peer_id);
+            
             if share_info.addresses.is_empty() {
                 warn!("No addresses provided in connection string!");
+                info!("Will rely on DHT discovery to find peer");
+                // The DHT search initiated above (line 536) will help discover the peer
+                // When the peer is found via DHT, the PeerDiscovered event will trigger connection
             } else {
                 info!("Trying {} addresses", share_info.addresses.len());
-            }
-            
-            // Attempt to dial the peer
-            for (i, addr_str) in share_info.addresses.iter().enumerate() {
-                info!("Trying address {}/{}: {}", i+1, share_info.addresses.len(), addr_str);
-                if let Ok(addr) = addr_str.parse::<Multiaddr>() {
-                    let mut network = self.network.lock();
-                    if let Err(e) = network.dial_peer(peer_id, addr.clone()) {
-                        warn!("Failed to dial peer {} at {}: {}", peer_id, addr, e);
+                
+                // Attempt to dial the peer
+                let mut connected = false;
+                for (i, addr_str) in share_info.addresses.iter().enumerate() {
+                    info!("Trying address {}/{}: {}", i+1, share_info.addresses.len(), addr_str);
+                    if let Ok(addr) = addr_str.parse::<Multiaddr>() {
+                        let mut network = self.network.lock();
+                        if let Err(e) = network.dial_peer(peer_id, addr.clone()) {
+                            warn!("Failed to dial peer {} at {}: {}", peer_id, addr, e);
+                        } else {
+                            info!("Successfully initiated dial to peer {} at {}", peer_id, addr);
+                            connected = true;
+                            // Don't request pack info yet - wait for PeerConnected event
+                            break;
+                        }
                     } else {
-                        info!("Successfully initiated dial to peer {} at {}", peer_id, addr);
-                        // Don't request pack info yet - wait for PeerConnected event
-                        break;
+                        warn!("Failed to parse address: {}", addr_str);
                     }
-                } else {
-                    warn!("Failed to parse address: {}", addr_str);
+                }
+                
+                if !connected {
+                    info!("Failed to connect via provided addresses, falling back to DHT discovery");
                 }
             }
         } else {

@@ -217,6 +217,32 @@ impl P2PNetwork {
         self.swarm.external_addresses().cloned().collect()
     }
 
+    /// Get relay addresses
+    pub fn relay_addresses(&self) -> Vec<Multiaddr> {
+        self.relay_addresses.clone()
+    }
+
+    /// Get all available addresses (listening + external + relay)
+    pub fn all_addresses(&self) -> Vec<Multiaddr> {
+        let mut addrs = self.listening_addresses();
+        addrs.extend(self.external_addresses());
+        
+        // Add relay circuit addresses if we have relays
+        if !self.relay_addresses.is_empty() {
+            for relay_addr in &self.relay_addresses {
+                // Try to extract relay peer ID from the address
+                if let Some(Protocol::P2p(relay_peer_id)) = relay_addr.iter().find(|p| matches!(p, Protocol::P2p(_))) {
+                    let mut circuit_addr = relay_addr.clone();
+                    circuit_addr.push(Protocol::P2pCircuit);
+                    circuit_addr.push(Protocol::P2p(self.local_peer_id));
+                    addrs.push(circuit_addr);
+                }
+            }
+        }
+        
+        addrs
+    }
+
     /// Request mod pack info from a peer
     pub fn request_pack_info(&mut self, peer: PeerId) -> req_resp::OutboundRequestId {
         self.swarm.behaviour_mut().file_transfer.send_request(&peer, FileTransferRequest::GetPackInfo)
