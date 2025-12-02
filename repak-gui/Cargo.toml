@@ -57,7 +57,7 @@ sevenz-rust = "0.6.1"
 walkdir = "2.5.0"
 
 # Update checking
-reqwest = { version = "0.12.8", features = ["blocking", "json", "rustls-tls"] }
+reqwest = { version = "0.12.8", features = ["blocking", "json", "rustls-tls", "multipart", "stream"] }
 semver = "1.0.23"
 open = "5.3.0"
 
@@ -92,10 +92,6 @@ libp2p = { version = "0.54", features = [
 ] }
 futures = "0.3"
 async-trait = "0.1"
-
-# WebRTC for true P2P (uses free Google STUN servers)
-webrtc = "0.11"
-futures-util = "0.3"
 
 # HTML scraping (for rivalskins.com)
 scraper = "0.21"
