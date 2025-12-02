@@ -26,14 +26,12 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 /// Chunk size for file transfers (64KB - small for relay efficiency)
 const CHUNK_SIZE: usize = 64 * 1024;
 
-/// Relay servers to try (in order)
-/// Using socketsbay.com - free WebSocket echo/broadcast service
-const RELAY_SERVERS: &[(&str, &str)] = &[
-    // SocketsBay - free, no API key needed, room in path
-    ("wss://socketsbay.com/wss/v2/1/demo/", ""),
-    // Backup: PieSocket (may have rate limits)
-    ("wss://free.blr2.piesocket.com/v3/", "?api_key=VCXCEuvhGcBDP7XhiJJUDvR1e1D3eiVjgZ9VRiaV&notify_self=1"),
-];
+/// ntfy.sh - Free, open-source pub/sub notification service
+/// No API key required, topics are created on-the-fly
+/// WebSocket for subscribe: wss://ntfy.sh/<topic>/ws
+/// HTTP POST for publish: https://ntfy.sh/<topic>
+const NTFY_WS_URL: &str = "wss://ntfy.sh";
+const NTFY_HTTP_URL: &str = "https://ntfy.sh";
 
 // ============================================================================
 // RELAY MESSAGE PROTOCOL
@@ -171,8 +169,10 @@ pub fn derive_key(key_b64: &str) -> Result<[u8; 32], String> {
 /// WebSocket relay client for P2P file transfer
 pub struct RelayClient {
     instance_id: String,
+    topic: String,
     tx: mpsc::UnboundedSender<RelayMessage>,
     connected: Arc<RwLock<bool>>,
+    http_client: reqwest::Client,
 }
 
 impl RelayClient {
@@ -184,42 +184,36 @@ impl RelayClient {
     
     /// Connect to a specific room/channel on the relay
     pub async fn connect_to_room(instance_id: String, room: &str) -> Result<(Self, mpsc::UnboundedReceiver<RelayMessage>), String> {
-        info!("[P2P Relay] Connecting to relay server...");
-        info!("[P2P Relay] Room: {}", room);
+        // Clean room name for ntfy topic (alphanumeric and dashes only, lowercase)
+        let clean_room = room.replace("/", "").replace("_", "-").to_lowercase();
+        let ws_url = format!("{}/{}/ws", NTFY_WS_URL, clean_room);
         
-        // Try each relay server until one works
-        let mut last_error = String::new();
-        let mut ws_stream = None;
+        info!("[P2P Relay] Connecting to ntfy.sh relay...");
+        info!("[P2P Relay] Topic: {}", clean_room);
+        info!("[P2P Relay] WebSocket URL: {}", ws_url);
         
-        for (base_url, suffix) in RELAY_SERVERS {
-            let url = format!("{}{}{}", base_url, room, suffix);
-            info!("[P2P Relay] Trying: {}", url);
-            
-            match connect_async(&url).await {
-                Ok((stream, response)) => {
-                    info!("[P2P Relay] Connected! Status: {}", response.status());
-                    ws_stream = Some(stream);
-                    break;
-                }
-                Err(e) => {
-                    warn!("[P2P Relay] Failed to connect to {}: {}", base_url, e);
-                    last_error = format!("{}", e);
-                }
-            }
-        }
+        // Create HTTP client for publishing
+        let http_client = reqwest::Client::new();
         
-        let ws_stream = ws_stream.ok_or_else(|| format!("All relay servers failed. Last error: {}", last_error))?;
+        let (ws_stream, response) = connect_async(&ws_url)
+            .await
+            .map_err(|e| format!("WebSocket connection failed: {}", e))?;
+        
+        info!("[P2P Relay] Connected! Status: {}", response.status());
+        
+        let topic = clean_room.clone();
 
-        let (mut write, mut read) = ws_stream.split();
+        let (_write, mut read) = ws_stream.split();
         let (tx, mut internal_rx) = mpsc::unbounded_channel::<RelayMessage>();
         let (event_tx, event_rx) = mpsc::unbounded_channel::<RelayMessage>();
         let connected = Arc::new(RwLock::new(true));
         let connected_clone = connected.clone();
-        let instance_id_clone = instance_id.clone();
 
-        // Spawn writer task
-        let tx_clone = tx.clone();
+        // Spawn HTTP publisher task (ntfy uses HTTP POST to publish, not WebSocket)
+        let publish_topic = topic.clone();
+        let publish_client = http_client.clone();
         tokio::spawn(async move {
+            let publish_url = format!("{}/{}", NTFY_HTTP_URL, publish_topic);
             while let Some(msg) = internal_rx.recv().await {
                 let json = match serde_json::to_string(&msg) {
                     Ok(j) => j,
@@ -228,36 +222,92 @@ impl RelayClient {
                         continue;
                     }
                 };
-                info!("[P2P Relay] >>> SENDING: {}", &json[..json.len().min(500)]);
-                if let Err(e) = write.send(Message::Text(json.clone())).await {
-                    error!("[P2P Relay] Send error: {}", e);
-                    break;
+                info!("[P2P Relay] >>> PUBLISHING to {}: {}", publish_topic, &json[..json.len().min(300)]);
+                
+                // Publish via HTTP POST
+                match publish_client.post(&publish_url)
+                    .body(json.clone())
+                    .send()
+                    .await 
+                {
+                    Ok(resp) => {
+                        if resp.status().is_success() {
+                            debug!("[P2P Relay] Published successfully");
+                        } else {
+                            error!("[P2P Relay] Publish failed: {}", resp.status());
+                        }
+                    }
+                    Err(e) => {
+                        error!("[P2P Relay] Publish error: {}", e);
+                    }
                 }
             }
-            info!("[P2P Relay] Writer task ended");
+            info!("[P2P Relay] Publisher task ended");
         });
 
         // Spawn reader task
+        // ntfy.sh sends messages in format: {"id":"x","time":123,"event":"message","topic":"t","message":"..."}
         tokio::spawn(async move {
             while let Some(msg_result) = read.next().await {
                 match msg_result {
                     Ok(Message::Text(text)) => {
                         info!("[P2P Relay] <<< RECEIVED: {}", &text[..text.len().min(500)]);
+                        
+                        // Try to parse as ntfy.sh message format first
+                        if let Ok(ntfy_msg) = serde_json::from_str::<serde_json::Value>(&text) {
+                            // Check if it's an ntfy event
+                            if let Some(event) = ntfy_msg.get("event").and_then(|e| e.as_str()) {
+                                match event {
+                                    "open" => {
+                                        info!("[P2P Relay] ntfy connection opened");
+                                        continue;
+                                    }
+                                    "keepalive" => {
+                                        debug!("[P2P Relay] ntfy keepalive");
+                                        continue;
+                                    }
+                                    "message" => {
+                                        // Extract the actual message content
+                                        if let Some(msg_content) = ntfy_msg.get("message").and_then(|m| m.as_str()) {
+                                            // Parse the message content as our RelayMessage
+                                            match serde_json::from_str::<RelayMessage>(msg_content) {
+                                                Ok(relay_msg) => {
+                                                    info!("[P2P Relay] Parsed RelayMessage: {:?}", std::mem::discriminant(&relay_msg));
+                                                    if let Err(e) = event_tx.send(relay_msg) {
+                                                        error!("[P2P Relay] Failed to forward message: {}", e);
+                                                        break;
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    warn!("[P2P Relay] Failed to parse message content: {} - {}", e, msg_content);
+                                                }
+                                            }
+                                        }
+                                        continue;
+                                    }
+                                    _ => {
+                                        debug!("[P2P Relay] Unknown ntfy event: {}", event);
+                                        continue;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        // Fallback: try to parse directly as RelayMessage
                         match serde_json::from_str::<RelayMessage>(&text) {
                             Ok(relay_msg) => {
-                                info!("[P2P Relay] Parsed as: {:?}", std::mem::discriminant(&relay_msg));
+                                info!("[P2P Relay] Parsed as direct RelayMessage: {:?}", std::mem::discriminant(&relay_msg));
                                 if let Err(e) = event_tx.send(relay_msg) {
                                     error!("[P2P Relay] Failed to forward message: {}", e);
                                     break;
                                 }
                             }
                             Err(e) => {
-                                // Might be a system message from the relay
-                                warn!("[P2P Relay] Non-protocol message (parse error: {}): {}", e, text);
+                                debug!("[P2P Relay] Ignoring non-protocol message: {}", &text[..text.len().min(100)]);
                             }
                         }
                     }
-                    Ok(Message::Ping(data)) => {
+                    Ok(Message::Ping(_)) => {
                         debug!("[P2P Relay] Received ping");
                     }
                     Ok(Message::Pong(_)) => {
@@ -282,8 +332,10 @@ impl RelayClient {
         Ok((
             Self {
                 instance_id,
+                topic,
                 tx,
                 connected,
+                http_client,
             },
             event_rx,
         ))
