@@ -13,7 +13,8 @@ import {
   WifiOff as WifiOffIcon,
   Security as SecurityIcon,
   Info as InfoIcon,
-  Error as ErrorIcon
+  Error as ErrorIcon,
+  Cancel as CancelIcon
 } from '@mui/icons-material';
 
 const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePath }) => {
@@ -24,21 +25,27 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
   // Share State
   const [packName, setPackName] = useState('');
   const [packDesc, setPackDesc] = useState('');
+  const [creatorName, setCreatorName] = useState('User');
   const [shareSession, setShareSession] = useState(null);
   const [isSharing, setIsSharing] = useState(false);
   const [selectedModPaths, setSelectedModPaths] = useState(new Set());
+  const [packPreview, setPackPreview] = useState(null);
+  const [calculatingPreview, setCalculatingPreview] = useState(false);
 
   // Receive State
   const [connectionString, setConnectionString] = useState('');
+  const [clientName, setClientName] = useState('User');
   const [isReceiving, setIsReceiving] = useState(false);
   const [progress, setProgress] = useState(null);
   const [receiveComplete, setReceiveComplete] = useState(false);
+  const [isValidCode, setIsValidCode] = useState(null); // null, true, false
 
   // Initialize selected mods from props
   useEffect(() => {
     if (isOpen && selectedMods && selectedMods.size > 0) {
       setSelectedModPaths(new Set(selectedMods));
       setPackName(`My Mod Pack (${selectedMods.size} mods)`);
+      setPackPreview(null); // Reset preview
     }
   }, [isOpen, selectedMods]);
 
@@ -51,6 +58,42 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
     }
     return () => clearInterval(interval);
   }, [isOpen]);
+
+  // Validation helper
+  const validateConnectionString = (str) => {
+    try {
+      const decoded = atob(str);
+      const shareInfo = JSON.parse(decoded);
+      return !!(shareInfo.peer_id && shareInfo.share_code && shareInfo.encryption_key);
+    } catch (e) {
+      return false;
+    }
+  };
+
+  // Validation effect
+  useEffect(() => {
+    const validate = async () => {
+      if (!connectionString.trim()) {
+        setIsValidCode(null);
+        return;
+      }
+
+      // Client-side validation (Base64 ShareInfo)
+      if (!validateConnectionString(connectionString)) {
+        setIsValidCode(false);
+        return;
+      }
+
+      try {
+        const valid = await invoke('p2p_validate_connection_string', { connectionString });
+        setIsValidCode(valid);
+      } catch (e) {
+        setIsValidCode(false);
+      }
+    };
+    const timeout = setTimeout(validate, 500);
+    return () => clearTimeout(timeout);
+  }, [connectionString]);
 
   const checkStatus = async () => {
     try {
@@ -78,6 +121,42 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
     }
   };
 
+  // Helper to get the connection string from session
+  const getConnectionString = () => {
+    if (!shareSession) return '';
+    // If it has connection_string (old ShareSession), use it
+    if (shareSession.connection_string) return shareSession.connection_string;
+    // If it's ShareInfo (new libp2p), encode it
+    if (shareSession.peer_id && shareSession.share_code) {
+        try {
+            return btoa(JSON.stringify(shareSession));
+        } catch (e) {
+            console.error("Failed to encode session", e);
+            return '';
+        }
+    }
+    return '';
+  };
+
+  const handleCalculatePreview = async () => {
+    if (selectedModPaths.size === 0) return;
+    setCalculatingPreview(true);
+    try {
+        const preview = await invoke('p2p_create_mod_pack_preview', {
+            name: packName || "Untitled",
+            description: packDesc || "",
+            modPaths: Array.from(selectedModPaths),
+            creator: creatorName
+        });
+        setPackPreview(preview);
+    } catch (err) {
+        console.error("Preview failed", err);
+        setError("Failed to calculate preview: " + err);
+    } finally {
+        setCalculatingPreview(false);
+    }
+  };
+
   const handleStartSharing = async () => {
     if (selectedModPaths.size === 0) {
       setError("Please select at least one mod to share.");
@@ -95,7 +174,7 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
         name: packName,
         description: packDesc,
         modPaths: Array.from(selectedModPaths),
-        creator: "User" // Could be configurable
+        creator: creatorName
       });
       setShareSession(session);
       setIsSharing(true);
@@ -123,6 +202,11 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
       return;
     }
 
+    if (!validateConnectionString(connectionString)) {
+      setError("Invalid connection string format.");
+      return;
+    }
+
     try {
       setError('');
       setStatus('Connecting...');
@@ -131,14 +215,9 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
       await invoke('p2p_validate_connection_string', { connectionString });
       
       // Start receiving
-      // We'll use a default 'ReceivedMods' folder or just the game path
-      // The backend likely puts them in the game path directly or a subfolder?
-      // The docs say "Connect and download all mods to the specified directory"
-      // Let's use the game path (mods folder)
       await invoke('p2p_start_receiving', {
         connectionString,
-        outputDir: gamePath,
-        clientName: "User"
+        clientName: clientName
       });
       
       setIsReceiving(true);
@@ -174,6 +253,7 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
       newSet.add(path);
     }
     setSelectedModPaths(newSet);
+    setPackPreview(null); // Invalidate preview
   };
 
   if (!isOpen) return null;
@@ -247,6 +327,16 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
                       className="p2p-textarea"
                     />
                   </div>
+                  <div className="form-group">
+                    <label>Creator Name (Optional)</label>
+                    <input 
+                      type="text" 
+                      value={creatorName} 
+                      onChange={(e) => setCreatorName(e.target.value)}
+                      placeholder="Your Name"
+                      className="p2p-input"
+                    />
+                  </div>
                   
                   <div className="mod-selection-list">
                     <label>Select Mods to Share ({selectedModPaths.size})</label>
@@ -270,7 +360,26 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
                     </div>
                   </div>
 
-                  <button onClick={handleStartSharing} className="btn-primary btn-large">
+                  {selectedModPaths.size > 0 && (
+                    <div className="pack-preview-section">
+                        {!packPreview ? (
+                            <button 
+                                onClick={handleCalculatePreview} 
+                                className="btn-secondary btn-small"
+                                disabled={calculatingPreview}
+                            >
+                                {calculatingPreview ? "Calculating..." : "Calculate Pack Size"}
+                            </button>
+                        ) : (
+                            <div className="preview-info">
+                                <span>Total Size: {(packPreview.total_size / 1024 / 1024).toFixed(2)} MB</span>
+                                <span>Files: {packPreview.file_count}</span>
+                            </div>
+                        )}
+                    </div>
+                  )}
+
+                  <button onClick={handleStartSharing} className="btn-primary btn-large" style={{marginTop: '1rem'}}>
                     <ShareIcon /> Start Sharing
                   </button>
                 </>
@@ -283,9 +392,9 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
                   <div className="share-code-display">
                     <label>SHARE CODE</label>
                     <div className="code-box">
-                      {shareSession?.connection_string}
+                      {getConnectionString()}
                       <button 
-                        onClick={() => copyToClipboard(shareSession?.connection_string)}
+                        onClick={() => copyToClipboard(getConnectionString())}
                         className="btn-copy"
                         title="Copy to clipboard"
                       >
@@ -299,6 +408,10 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
                     <div className="info-row">
                       <span>Pack Name:</span>
                       <strong>{packName}</strong>
+                    </div>
+                    <div className="info-row">
+                      <span>Creator:</span>
+                      <strong>{creatorName}</strong>
                     </div>
                     <div className="info-row">
                       <span>Mods:</span>
@@ -324,21 +437,40 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
                 <>
                   <div className="form-group">
                     <label>Enter Share Code</label>
-                    <input 
-                      type="text" 
-                      value={connectionString} 
-                      onChange={(e) => setConnectionString(e.target.value)}
-                      placeholder="Paste the connection string here..."
-                      className="p2p-input code-input"
-                    />
+                    <div className="input-with-validation">
+                        <input 
+                        type="text" 
+                        value={connectionString} 
+                        onChange={(e) => setConnectionString(e.target.value)}
+                        placeholder="Paste the connection string here..."
+                        className={`p2p-input code-input ${isValidCode === true ? 'valid' : isValidCode === false ? 'invalid' : ''}`}
+                        />
+                        {isValidCode === true && <CheckIcon className="validation-icon valid" />}
+                        {isValidCode === false && <CancelIcon className="validation-icon invalid" />}
+                    </div>
                   </div>
                   
+                  <div className="form-group">
+                    <label>Your Name (Optional)</label>
+                    <input 
+                      type="text" 
+                      value={clientName} 
+                      onChange={(e) => setClientName(e.target.value)}
+                      placeholder="Enter your name"
+                      className="p2p-input"
+                    />
+                  </div>
+
                   <div className="security-note">
                     <SecurityIcon fontSize="small" />
                     <p>Only connect to people you trust. All transfers are encrypted.</p>
                   </div>
 
-                  <button onClick={handleStartReceiving} className="btn-primary btn-large">
+                  <button 
+                    onClick={handleStartReceiving} 
+                    className="btn-primary btn-large"
+                    disabled={isValidCode === false}
+                  >
                     <DownloadIcon /> Connect & Download
                   </button>
                 </>
@@ -354,6 +486,7 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
                           setReceiveComplete(false);
                           setConnectionString('');
                           setProgress(null);
+                          setIsValidCode(null);
                         }} 
                         className="btn-secondary"
                       >
@@ -362,7 +495,7 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
                     </div>
                   ) : (
                     <>
-                      <h3>Downloading...</h3>
+                      <h3>{progress?.status === 'Connecting' ? 'Connecting via relay...' : 'Downloading...'}</h3>
                       {progress && (
                         <div className="progress-container">
                           <div className="progress-info">
@@ -690,6 +823,48 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
           margin-bottom: 1.5rem;
           color: #ffc107;
           font-size: 0.9rem;
+        }
+        .btn-small {
+            padding: 0.5rem;
+            font-size: 0.9rem;
+        }
+        .code-input.valid {
+            border-color: #2ecc71;
+            background: rgba(46, 204, 113, 0.05);
+        }
+        .code-input.invalid {
+            border-color: #ff4a4a;
+            background: rgba(255, 74, 74, 0.05);
+        }
+        .input-with-validation {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .validation-icon {
+            position: absolute;
+            right: 10px;
+            font-size: 1.2rem;
+        }
+        .validation-icon.valid {
+            color: #2ecc71;
+        }
+        .validation-icon.invalid {
+            color: #ff4a4a;
+        }
+        .pack-preview-section {
+            margin-bottom: 1rem;
+            padding: 0.75rem;
+            background: #252525;
+            border-radius: 6px;
+            display: flex;
+            justify-content: center;
+        }
+        .preview-info {
+            display: flex;
+            gap: 1.5rem;
+            font-weight: 600;
+            color: #ccc;
         }
         .progress-container {
           background: #252525;
