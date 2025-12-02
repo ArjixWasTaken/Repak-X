@@ -15,11 +15,13 @@ import {
   Folder as FolderIcon,
   GridView as GridViewIcon,
   ViewModule as ViewModuleIcon,
-  ViewList as ViewListIcon
+  ViewList as ViewListIcon,
+  Wifi as WifiIcon
 } from '@mui/icons-material'
 import ModDetailsPanel from './components/ModDetailsPanel'
 import InstallModPanel from './components/InstallModPanel'
 import SettingsPanel from './components/SettingsPanel'
+import P2PSharingPanel from './components/P2PSharingPanel'
 import FileTree from './components/FileTree'
 import ContextMenu from './components/ContextMenu'
 import './App.css'
@@ -165,6 +167,7 @@ function App() {
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
   const [showSettings, setShowSettings] = useState(false);
+  const [showP2PPanel, setShowP2PPanel] = useState(false);
 
   const [gamePath, setGamePath] = useState('')
   const [mods, setMods] = useState([])
@@ -232,6 +235,13 @@ function App() {
       loadMods()
     })
 
+    // Listen for directory changes (new folders, deleted folders, etc.)
+    const unlistenDirChanged = listen('mods_dir_changed', () => {
+      console.log('Directory changed, reloading mods and folders...')
+      loadMods()
+      loadFolders()
+    })
+
     // Unified file drop handler function
     const handleFileDrop = async (paths) => {
       if (!paths || paths.length === 0) return
@@ -282,6 +292,7 @@ function App() {
       unlistenDragDrop.then(f => f())
       unlistenFileDrop.then(f => f())
       unlistenLogs.then(f => f())
+      unlistenDirChanged.then(f => f())
       document.removeEventListener('dragover', preventDefault)
       document.removeEventListener('drop', preventDefault)
     }
@@ -320,6 +331,9 @@ function App() {
       await loadMods()
       await loadFolders()
       await checkGame()
+      
+      // Start the file watcher
+      await invoke('start_file_watcher')
     } catch (error) {
       console.error('Failed to load initial data:', error)
     }
@@ -790,6 +804,14 @@ function App() {
         />
       )}
 
+      <P2PSharingPanel 
+        isOpen={showP2PPanel}
+        onClose={() => setShowP2PPanel(false)}
+        installedMods={mods}
+        selectedMods={selectedMods}
+        gamePath={gamePath}
+      />
+
       <header className="header" style={{ display: 'flex', alignItems: 'center' }}>
         <img src={logo} alt="Repak Icon" className="repak-icon" style={{ width: '50px', height: '50px', marginRight: '10px' }} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
@@ -805,6 +827,13 @@ function App() {
             />
             <span style={{ fontSize: '0.8rem', color: '#ff6b6b', fontWeight: 'bold' }}>DEV: Game Running</span>
           </label>
+          <button 
+            onClick={() => setShowP2PPanel(true)} 
+            className="btn-settings"
+            title="P2P Mod Sharing"
+          >
+            <WifiIcon /> P2P Share
+          </button>
           <button 
             onClick={() => setShowSettings(true)} 
             className="btn-settings"
@@ -872,9 +901,22 @@ function App() {
             <div className="left-sidebar">
               <div className="sidebar-header">
                 <h3>Folders</h3>
-                <button onClick={handleCreateFolder} className="btn-icon" title="New Folder">
-                  <CreateNewFolderIcon fontSize="small" />
-                </button>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button 
+                    onClick={async () => {
+                      await loadFolders()
+                      await loadMods()
+                      setStatus('Folders refreshed')
+                    }} 
+                    className="btn-icon" 
+                    title="Refresh Folders"
+                  >
+                    <RefreshIcon fontSize="small" />
+                  </button>
+                  <button onClick={handleCreateFolder} className="btn-icon" title="New Folder">
+                    <CreateNewFolderIcon fontSize="small" />
+                  </button>
+                </div>
               </div>
               <div className="folder-list">
                 <div 
