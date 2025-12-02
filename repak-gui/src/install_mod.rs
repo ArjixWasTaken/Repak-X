@@ -1,6 +1,6 @@
 pub mod install_mod_logic;
 
-use crate::install_mod::install_mod_logic::archives::{extract_zip, extract_rar};
+use crate::install_mod::install_mod_logic::archives::{extract_zip, extract_rar, extract_7z};
 use crate::uasset_detection::{detect_mesh_files, detect_texture_files};
 use crate::utils::{collect_files, get_current_pak_characteristics};
 use crate::utoc_utils::read_utoc;
@@ -524,60 +524,86 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
         let entry = entry.expect("Failed to read directory entry");
         let path = entry.path();
         if path.is_file() {
-            let builder = repak::PakBuilder::new()
-                .key(AES_KEY.clone().0)
-                .reader(&mut BufReader::new(File::open(path).unwrap()));
+            let pak_path = path.with_extension("pak");
+            let utoc_path = path.with_extension("utoc");
+            let ucas_path = path.with_extension("ucas");
 
-            if let Ok(builder) = builder {
-                let mut len = 1;
-                let mut modtype = String::from("Unknown");
-                let mut iostore = false;
+            // Check if this is an iostore mod (has all three files: pak, utoc, ucas)
+            if pak_path.exists() && utoc_path.exists() && ucas_path.exists() {
+                // This is an iostore mod - just copy the files, don't go through repak workflow
+                let builder = repak::PakBuilder::new()
+                    .key(AES_KEY.clone().0)
+                    .reader(&mut BufReader::new(File::open(&pak_path).unwrap()));
 
-
-                let pak_path = path.with_extension("pak");
-                let utoc_path = path.with_extension("utoc");
-                let ucas_path = path.with_extension("ucas");
-
-                if pak_path.exists() && utoc_path.exists() && ucas_path.exists()
-                {
-                    // this is a mod of type s2, create a new Installable mod from its characteristics
-                    let utoc_path = path.with_extension("utoc");
-
-                    let files = read_utoc(&utoc_path, &builder, &path);
+                if let Ok(builder) = builder {
+                    let files = read_utoc(&utoc_path, &builder, &pak_path);
                     let files = files
                         .iter()
                         .map(|x| x.file_path.clone())
                         .collect::<Vec<_>>();
-                    len = files.len();
-                    modtype = get_current_pak_characteristics(files);
-                    iostore = true;
+                    let len = files.len();
+                    let modtype = get_current_pak_characteristics(files);
+
+                    let installable_mod = InstallableMod {
+                        mod_name: pak_path.file_stem().unwrap().to_str().unwrap().to_string(),
+                        mod_type: modtype.to_string(),
+                        repak: false,  // Don't use repak workflow for iostore mods
+                        fix_mesh: false,
+                        is_dir: false,
+                        reader: Some(builder),
+                        mod_path: pak_path.to_path_buf(),
+                        mount_point: "../../../".to_string(),
+                        path_hash_seed: "00000000".to_string(),
+                        total_files: len,
+                        iostore: true,  // Mark as iostore so it gets copied directly
+                        is_archived: false,
+                        editing: false,
+                        compression: Oodle,
+                        ..Default::default()
+                    };
+
+                    new_mods.push(installable_mod);
                 }
-                // IF ONLY PAK IS FOUND WE NEED TO EXTRACT AND INSTALL THE PAK
-                else if pak_path.exists()  {
+            }
+            // Only process .pak files (skip .utoc and .ucas files)
+            else if path.extension().and_then(|s| s.to_str()) == Some("pak") {
+                let builder = repak::PakBuilder::new()
+                    .key(AES_KEY.clone().0)
+                    .reader(&mut BufReader::new(File::open(path).unwrap()));
+
+                if let Ok(builder) = builder {
                     let files = builder.files();
-                    len = files.len();
-                    modtype = get_current_pak_characteristics(files);
+                    let len = files.len();
+                    let modtype = get_current_pak_characteristics(files.clone());
+                    
+                    // Check if this is an Audio or Movies mod (these should skip repak workflow)
+                    let is_audio_or_movie = modtype.contains("Audio") || modtype.contains("Movies");
+                    
+                    // Auto-detect mesh and texture files
+                    let auto_fix_mesh = detect_mesh_files(&files);
+                    let auto_fix_textures = detect_texture_files(&files);
+
+                    let installable_mod = InstallableMod {
+                        mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
+                        mod_type: modtype.to_string(),
+                        repak: !is_audio_or_movie,  // Only use repak if NOT Audio/Movies
+                        fix_mesh: auto_fix_mesh,
+                        fix_textures: auto_fix_textures,
+                        is_dir: false,
+                        reader: Some(builder),
+                        mod_path: path.to_path_buf(),
+                        mount_point: "../../../".to_string(),
+                        path_hash_seed: "00000000".to_string(),
+                        total_files: len,
+                        iostore: false,
+                        is_archived: false,
+                        editing: false,
+                        compression: Oodle,
+                        ..Default::default()
+                    };
+
+                    new_mods.push(installable_mod);
                 }
-
-                let installable_mod = InstallableMod {
-                    mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
-                    mod_type: modtype.to_string(),
-                    repak: true,
-                    fix_mesh: false,
-                    is_dir: false,
-                    reader: Some(builder),
-                    mod_path: path.to_path_buf(),
-                    mount_point: "../../../".to_string(),
-                    path_hash_seed: "00000000".to_string(),
-                    total_files: len,
-                    iostore,
-                    is_archived: false,
-                    editing: false,
-                    compression: Oodle,
-                    ..Default::default()
-                };
-
-                new_mods.push(installable_mod);
             }
         }
     }
@@ -592,7 +618,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
         .map(|path| {
             let is_dir = path.clone().is_dir();
             let extension = path.extension().unwrap_or_default();
-            let is_archive = extension == "zip" || extension == "rar";
+            let is_archive = extension == "zip" || extension == "rar" || extension == "7z";
 
             let mut modtype = "Unknown".to_string();
             let mut pak = None;
@@ -638,7 +664,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             }
 
             if is_archive {
-                modtype = "Season 2 Archives".to_string();
+                modtype = "Archive".to_string();
                 let tempdir = tempdir()
                     .unwrap()
                     .path()
@@ -648,12 +674,14 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                     .to_string();
 
                 if extension == "zip" {
-                    extract_zip(path.to_str().unwrap(), &tempdir).expect("Unable to install mod")
+                    extract_zip(path.to_str().unwrap(), &tempdir).expect("Unable to extract zip archive")
                 } else if extension == "rar" {
-                    extract_rar(path.to_str().unwrap(), &tempdir).expect("Unable to install mod")
+                    extract_rar(path.to_str().unwrap(), &tempdir).expect("Unable to extract rar archive")
+                } else if extension == "7z" {
+                    extract_7z(path.to_str().unwrap(), &tempdir).expect("Unable to extract 7z archive")
                 }
 
-                // Now find pak files / s2 archives and turn them into installable mods
+                // Now find pak files / iostore mods and turn them into installable mods
                 let mut new_mods = find_mods_from_archive(&tempdir);
                 extensible_vec.append(&mut new_mods);
             }

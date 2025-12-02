@@ -53,6 +53,7 @@ regex-lite = "0.1.5"
 retoc = {path = "../retoc-rivals"}
 unrar = "0.5.8"
 zip = "2.6.1"
+sevenz-rust = "0.6.1"
 walkdir = "2.5.0"
 
 # Update checking

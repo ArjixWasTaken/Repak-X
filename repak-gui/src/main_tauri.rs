@@ -475,7 +475,14 @@ async fn parse_dropped_files(
             } else {
                 ("Directory".to_string(), false, false, false)
             }
-        } else if path.extension().and_then(|s| s.to_str()) == Some("pak") {
+        } else if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+            // Check if it's an archive file (zip, rar, 7z)
+            if ext == "zip" || ext == "rar" || ext == "7z" {
+                let _ = window.emit("install_log", format!("[Detection] Archive detected: {} ({})", mod_name, ext));
+                
+                // For archives, we'll mark them as "Archive" type and let the backend handle extraction
+                ("Archive".to_string(), false, false, false)
+            } else if ext == "pak" {
             // Try to read PAK and determine type
             if let Ok(file) = File::open(&path) {
                 // Create AES key for each file
@@ -601,6 +608,9 @@ async fn parse_dropped_files(
                 } else {
                     ("Unknown".to_string(), false, false, false)
                 }
+            } else {
+                ("Unknown".to_string(), false, false, false)
+            }
             } else {
                 ("Unknown".to_string(), false, false, false)
             }
