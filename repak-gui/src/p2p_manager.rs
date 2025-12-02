@@ -517,6 +517,9 @@ impl UnifiedP2PManager {
         let share_info = ShareInfo::decode(connection_string)
             .map_err(|e| P2PError::ValidationError(format!("Invalid connection string: {}", e)))?;
 
+        info!("Decoded share info: peer_id={}, addresses={:?}, share_code={}", 
+            share_info.peer_id, share_info.addresses, share_info.share_code);
+
         // Search for peer in DHT
         {
             let mut network = self.network.lock();
@@ -541,20 +544,33 @@ impl UnifiedP2PManager {
         );
 
         // Try to connect to peer directly if we have addresses
+        info!("Attempting to connect to peer...");
         if let Ok(peer_id) = share_info.peer_id.parse::<PeerId>() {
+            info!("Parsed peer ID: {}", peer_id);
+            if share_info.addresses.is_empty() {
+                warn!("No addresses provided in connection string!");
+            } else {
+                info!("Trying {} addresses", share_info.addresses.len());
+            }
+            
             // Attempt to dial the peer
-            for addr_str in &share_info.addresses {
+            for (i, addr_str) in share_info.addresses.iter().enumerate() {
+                info!("Trying address {}/{}: {}", i+1, share_info.addresses.len(), addr_str);
                 if let Ok(addr) = addr_str.parse::<Multiaddr>() {
                     let mut network = self.network.lock();
                     if let Err(e) = network.dial_peer(peer_id, addr.clone()) {
-                        warn!("Failed to dial peer {}: {}", peer_id, e);
+                        warn!("Failed to dial peer {} at {}: {}", peer_id, addr, e);
                     } else {
-                        info!("Dialing peer {} at {}", peer_id, addr);
+                        info!("Successfully initiated dial to peer {} at {}", peer_id, addr);
                         // Don't request pack info yet - wait for PeerConnected event
                         break;
                     }
+                } else {
+                    warn!("Failed to parse address: {}", addr_str);
                 }
             }
+        } else {
+            warn!("Failed to parse peer ID: {}", share_info.peer_id);
         }
 
         info!("Started receiving: {}", share_info.share_code);
