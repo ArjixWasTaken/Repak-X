@@ -3,10 +3,10 @@
 //! Defines the request/response protocol for file transfers over libp2p streams.
 
 use libp2p::request_response::{
-    Codec, ProtocolName, ProtocolSupport, RequestResponse, RequestResponseConfig,
-    RequestResponseEvent, RequestResponseMessage,
+    Codec, ProtocolSupport, ResponseChannel,
 };
 use libp2p::{StreamProtocol, PeerId};
+use libp2p::request_response as req_resp;
 use async_trait::async_trait;
 use futures::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -20,9 +20,9 @@ use std::io;
 #[derive(Debug, Clone)]
 pub struct FileTransferProtocol;
 
-impl ProtocolName for FileTransferProtocol {
-    fn protocol_name(&self) -> &[u8] {
-        b"/repak/file-transfer/1.0.0"
+impl AsRef<str> for FileTransferProtocol {
+    fn as_ref(&self) -> &str {
+        "/repak/file-transfer/1.0.0"
     }
 }
 
@@ -75,7 +75,7 @@ pub enum FileTransferResponse {
 // ============================================================================
 
 /// Codec for encoding/decoding file transfer messages
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct FileTransferCodec;
 
 #[async_trait]
@@ -182,12 +182,11 @@ impl Codec for FileTransferCodec {
 // ============================================================================
 
 /// Create a configured file transfer protocol
-pub fn create_file_transfer_protocol() -> RequestResponse<FileTransferCodec> {
+pub fn create_file_transfer_protocol() -> req_resp::Behaviour<FileTransferCodec> {
     let protocols = vec![(FileTransferProtocol, ProtocolSupport::Full)];
-    let config = RequestResponseConfig::default();
+    let config = req_resp::Config::default();
     
-    RequestResponse::new(
-        FileTransferCodec,
+    req_resp::Behaviour::new(
         protocols.into_iter(),
         config,
     )
@@ -204,7 +203,7 @@ pub enum FileTransferEvent {
     RequestReceived {
         peer: PeerId,
         request: FileTransferRequest,
-        channel: libp2p::request_response::ResponseChannel<FileTransferResponse>,
+        channel: ResponseChannel<FileTransferResponse>,
     },
     /// Received a response
     ResponseReceived {
@@ -218,28 +217,28 @@ pub enum FileTransferEvent {
     },
 }
 
-impl From<RequestResponseEvent<FileTransferRequest, FileTransferResponse>> for FileTransferEvent {
-    fn from(event: RequestResponseEvent<FileTransferRequest, FileTransferResponse>) -> Self {
+impl From<req_resp::Event<FileTransferRequest, FileTransferResponse>> for FileTransferEvent {
+    fn from(event: req_resp::Event<FileTransferRequest, FileTransferResponse>) -> Self {
         match event {
-            RequestResponseEvent::Message { peer, message } => match message {
-                RequestResponseMessage::Request { request, channel, .. } => {
+            req_resp::Event::Message { peer, message } => match message {
+                req_resp::Message::Request { request, channel, .. } => {
                     FileTransferEvent::RequestReceived {
                         peer,
                         request,
                         channel,
                     }
                 }
-                RequestResponseMessage::Response { response, .. } => {
+                req_resp::Message::Response { response, .. } => {
                     FileTransferEvent::ResponseReceived { peer, response }
                 }
             },
-            RequestResponseEvent::OutboundFailure { peer, error, .. } => {
+            req_resp::Event::OutboundFailure { peer, error, .. } => {
                 FileTransferEvent::RequestFailed {
                     peer,
                     error: format!("{:?}", error),
                 }
             }
-            RequestResponseEvent::InboundFailure { peer, error, .. } => {
+            req_resp::Event::InboundFailure { peer, error, .. } => {
                 FileTransferEvent::RequestFailed {
                     peer,
                     error: format!("{:?}", error),

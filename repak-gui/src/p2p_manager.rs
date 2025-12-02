@@ -5,10 +5,9 @@
 
 use crate::p2p_libp2p::{P2PNetwork, P2PNetworkEvent, ShareInfo};
 use crate::p2p_sharing::{ShareableModPack, ShareSession, TransferProgress, P2PError, P2PResult};
-use crate::p2p_security::{SecurityValidator, MerkleTree};
-use crate::p2p_protocol::{FileTransferRequest, FileTransferResponse};
+use crate::p2p_security::MerkleTree;
 use libp2p::{Multiaddr, PeerId};
-use log::{error, info, warn};
+use log::info;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -17,6 +16,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use sha2::{Digest, Sha256};
+use base64::Engine;
 
 // ============================================================================
 // UNIFIED P2P MANAGER
@@ -173,7 +173,7 @@ impl UnifiedP2PManager {
         let mod_pack = crate::p2p_sharing::create_mod_pack(
             name,
             description,
-            mod_paths.clone(),
+            &mod_paths,
             creator,
         )?;
 

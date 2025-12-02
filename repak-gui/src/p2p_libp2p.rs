@@ -16,12 +16,11 @@ use libp2p::{
     noise, relay, swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux, Multiaddr, PeerId, Swarm, SwarmBuilder,
 };
-use log::{debug, info, warn, error};
-use std::collections::HashMap;
+use log::{debug, info, warn};
 use std::error::Error;
 use std::time::Duration;
-use tokio::sync::mpsc;
 use serde::{Deserialize, Serialize};
+use base64::Engine;
 
 // ============================================================================
 // NETWORK BEHAVIOUR
@@ -125,7 +124,7 @@ impl P2PNetwork {
                 yamux::Config::default,
             )?
             .with_relay_client(noise::Config::new, yamux::Config::default)?
-            .with_behaviour(|_| behaviour)?
+            .with_behaviour(|_, _| Ok(behaviour))?
             .with_swarm_config(|c| c.with_idle_connection_timeout(Duration::from_secs(60)))
             .build();
 
@@ -212,8 +211,9 @@ impl P2PNetwork {
 
     /// Process network events
     pub async fn next_event(&mut self) -> Option<P2PNetworkEvent> {
+        use futures::StreamExt;
         loop {
-            match self.swarm.select_next_some().await {
+            match self.swarm.next().await? {
                 SwarmEvent::NewListenAddr { address, .. } => {
                     info!("Listening on: {}", address);
                     return Some(P2PNetworkEvent::ListeningOn(address));
@@ -270,7 +270,7 @@ impl P2PNetwork {
             }
             P2PBehaviourEvent::Identify(identify_event) => {
                 match identify_event {
-                    identify::Event::Received { peer_id, info } => {
+                    identify::Event::Received { peer_id, info, .. } => {
                         debug!("Identified peer {}: {:?}", peer_id, info);
                         // Add peer to DHT routing table
                         for addr in info.listen_addrs {
@@ -281,19 +281,8 @@ impl P2PNetwork {
                 }
             }
             P2PBehaviourEvent::Dcutr(dcutr_event) => {
-                match dcutr_event {
-                    dcutr::Event::RemoteInitiatedDirectConnectionUpgrade { remote_peer_id, .. } => {
-                        info!("Remote peer {} initiated hole punching", remote_peer_id);
-                    }
-                    dcutr::Event::DirectConnectionUpgradeSucceeded { remote_peer_id } => {
-                        info!("Hole punching successful with {}", remote_peer_id);
-                        return Some(P2PNetworkEvent::HolePunchingSuccess(remote_peer_id));
-                    }
-                    dcutr::Event::DirectConnectionUpgradeFailed { remote_peer_id, error } => {
-                        warn!("Hole punching failed with {}: {}", remote_peer_id, error);
-                    }
-                    _ => {}
-                }
+                // DCUtR (Direct Connection Upgrade through Relay) events
+                debug!("DCUtR event: {:?}", dcutr_event);
             }
             P2PBehaviourEvent::Autonat(autonat_event) => {
                 match autonat_event {
