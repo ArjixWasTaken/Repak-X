@@ -167,7 +167,21 @@ impl UnifiedP2PManager {
                     }
                     P2PNetworkEvent::SharePeerFound(peer_id) => {
                         info!("Found peer for share: {}", peer_id);
-                        // This would need the share code context
+                        
+                        // Check if we are waiting for this peer in any active download
+                        let downloads = active_downloads.lock();
+                        let should_connect = downloads.iter().any(|(_, d)| {
+                            d.share_info.peer_id.parse::<PeerId>().ok() == Some(peer_id)
+                        });
+                        drop(downloads);
+
+                        if should_connect {
+                            info!("Found target peer {}, initiating connection", peer_id);
+                            let mut net = network.lock();
+                            if let Err(e) = net.dial_peer_id(peer_id) {
+                                warn!("Failed to dial peer {}: {}", peer_id, e);
+                            }
+                        }
                     }
                     P2PNetworkEvent::HolePunchingSuccess(peer_id) => {
                         info!("Hole punching successful with: {}", peer_id);

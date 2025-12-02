@@ -175,6 +175,22 @@ impl P2PNetwork {
 
     /// Bootstrap the DHT with known peers
     pub fn bootstrap(&mut self) -> Result<(), Box<dyn Error>> {
+        // Add IPFS bootstrap nodes
+        let bootnodes = [
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmNnooDu7bfjPFoTZYxMNLWUQJyrVwtbZg5gBMjTezGAJN",
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmQCU2EcMqAqQPR2i9bChDtGNJchTbq5TbXJJ16u19uLTa",
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmbLHAnMoJPWSCR5Zhtx6BHJX9CkDHEjzdU93P85Q92qxH",
+            "/dnsaddr/bootstrap.libp2p.io/p2p/QmcZf59bWwK5XFi76CZX8cbJ4BhTzzA3gU1ZjdEP8kQ2LP",
+        ];
+
+        for node in bootnodes {
+            if let Ok(addr) = node.parse::<Multiaddr>() {
+                if let Some(Protocol::P2p(peer_id)) = addr.iter().find(|p| matches!(p, Protocol::P2p(_))) {
+                    self.swarm.behaviour_mut().kad.add_address(&peer_id, addr);
+                }
+            }
+        }
+
         self.swarm.behaviour_mut().kad.bootstrap()?;
         Ok(())
     }
@@ -401,6 +417,12 @@ impl P2PNetwork {
         let mut addr_with_peer = addr.clone();
         addr_with_peer.push(Protocol::P2p(peer_id));
         self.swarm.dial(addr_with_peer)?;
+        Ok(())
+    }
+
+    /// Dial a peer by ID (relying on DHT/PeerStore for address)
+    pub fn dial_peer_id(&mut self, peer_id: PeerId) -> Result<(), Box<dyn Error>> {
+        self.swarm.dial(peer_id)?;
         Ok(())
     }
 }
