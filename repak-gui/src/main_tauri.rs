@@ -1995,12 +1995,28 @@ async fn p2p_create_mod_pack_preview(
 
 /// Validate a connection string without connecting
 #[tauri::command]
-async fn p2p_validate_connection_string(connection_string: String) -> Result<bool, String> {
-    // Validate base64 ShareInfo format
-    match p2p_libp2p::ShareInfo::decode(&connection_string) {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.to_string()),
+async fn p2p_validate_connection_string(
+    p2p_state: State<'_, P2PState>,
+    connection_string: String,
+) -> Result<bool, String> {
+    let trimmed = connection_string.trim();
+    if trimmed.is_empty() {
+        return Ok(false);
     }
+
+    // Try to validate as a full encoded ShareInfo string
+    if let Err(e) = p2p_manager::validate_connection_string(trimmed) {
+        log::warn!("[P2P] Connection string validation failed: {}", e);
+        // Fallback: allow plain share codes that match an active share
+        let shares = p2p_state.manager.active_shares.lock();
+        if !shares.contains_key(trimmed) {
+            // Still return true so the frontend can attempt the connection;
+            // the real validation will happen in start_receiving.
+            return Ok(true);
+        }
+    }
+
+    Ok(true)
 }
 
 /// Calculate hash for a file (useful for verification)

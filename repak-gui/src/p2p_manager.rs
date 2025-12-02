@@ -279,5 +279,29 @@ async fn download_and_extract(url: &str, out_dir: &PathBuf, dl: Arc<Mutex<HashMa
 }
 
 pub fn validate_connection_string(s: &str) -> P2PResult<bool> {
-    ShareInfo::decode(s).map(|info| !info.addresses.is_empty()).map_err(|e| P2PError::ValidationError(format!("{}", e)))
+    // Helper: try to decode a ShareInfo and ensure it has at least one address
+    fn try_decode(input: &str) -> P2PResult<bool> {
+        ShareInfo::decode(input)
+            .map(|info| !info.addresses.is_empty())
+            .map_err(|e| P2PError::ValidationError(format!("{}", e)))
+    }
+
+    // 1) First try the raw string as-is
+    if let Ok(valid) = try_decode(s) {
+        return Ok(valid);
+    }
+
+    // 2) Fallback: strip any non-base64 prefix (e.g. ":" or "Share Code: ")
+    let trimmed = s.trim();
+    let start_idx = trimmed
+        .char_indices()
+        .find(|&(_, c)| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+        .map(|(i, _)| i);
+
+    if let Some(i) = start_idx {
+        let candidate = &trimmed[i..];
+        return try_decode(candidate);
+    }
+
+    Err(P2PError::ValidationError("Invalid connection string".to_string()))
 }
