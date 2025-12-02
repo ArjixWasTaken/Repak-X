@@ -6,6 +6,7 @@
 //! - Random share code generation for peer discovery
 //! - TCP-based file transfer with progress tracking
 
+use crate::ip_obfuscation;
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -93,8 +94,11 @@ pub struct ShareSession {
     pub share_code: String,
     /// The encryption key (base64 encoded, part of full code)
     pub encryption_key: String,
-    /// Local IP address
+    /// Local IP address (internal use only - not serialized to frontend)
+    #[serde(skip_serializing)]
     pub local_ip: String,
+    /// Obfuscated IP for display purposes
+    pub obfuscated_ip: String,
     /// Port listening on
     pub port: u16,
     /// Full connection string for sharing
@@ -478,6 +482,7 @@ impl P2PServer {
         let session = ShareSession {
             share_code,
             encryption_key: key_b64,
+            obfuscated_ip: ip_obfuscation::obfuscate_ip(&local_ip),
             local_ip,
             port,
             connection_string,

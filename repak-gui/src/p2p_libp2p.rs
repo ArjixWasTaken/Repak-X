@@ -10,6 +10,7 @@
 //! - AutoNAT for detecting NAT type
 //! - Encrypted connections via Noise protocol
 
+use crate::ip_obfuscation;
 use libp2p::{
     autonat, dcutr, gossipsub, identify, kad,
     multiaddr::Protocol,
@@ -215,11 +216,14 @@ impl P2PNetwork {
         loop {
             match self.swarm.next().await? {
                 SwarmEvent::NewListenAddr { address, .. } => {
-                    info!("Listening on: {}", address);
+                    let obfuscated = ip_obfuscation::obfuscate_multiaddr(&address.to_string());
+                    info!("Listening on: {}", obfuscated);
                     return Some(P2PNetworkEvent::ListeningOn(address));
                 }
                 SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                    info!("Connected to peer: {} at {}", peer_id, endpoint.get_remote_address());
+                    let addr = endpoint.get_remote_address().to_string();
+                    let obfuscated = ip_obfuscation::obfuscate_multiaddr(&addr);
+                    info!("Connected to peer: {} at {}", peer_id, obfuscated);
                     return Some(P2PNetworkEvent::PeerConnected(peer_id));
                 }
                 SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
@@ -368,6 +372,11 @@ impl ShareInfo {
         let json = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(encoded)?;
         let share_info = serde_json::from_slice(&json)?;
         Ok(share_info)
+    }
+
+    /// Get obfuscated addresses for display purposes
+    pub fn obfuscated_addresses(&self) -> Vec<String> {
+        ip_obfuscation::obfuscate_multiaddrs(&self.addresses)
     }
 }
 
