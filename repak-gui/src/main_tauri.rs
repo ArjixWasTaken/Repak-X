@@ -166,7 +166,7 @@ async fn start_file_watcher(
     let watcher_result = notify::recommended_watcher(move |res: Result<Event, notify::Error>| {
         match res {
             Ok(event) => {
-                // We only care about Create, Remove, Rename, and Modify events on files
+                // We only care about Create, Remove, Rename, and Modify events (files and directories)
                 match event.kind {
                     EventKind::Create(_) | EventKind::Remove(_) | EventKind::Modify(_) => {
                          // Debouncing or simple filtering can be done here if needed.
