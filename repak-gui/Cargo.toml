@@ -93,8 +93,8 @@ libp2p = { version = "0.54", features = [
 futures = "0.3"
 async-trait = "0.1"
 
-# WebSocket for relay-based P2P (secure, no IP exposure)
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-native-roots"] }
+# WebRTC for true P2P (uses free Google STUN servers)
+webrtc = "0.11"
 futures-util = "0.3"
 
 # HTML scraping (for rivalskins.com)

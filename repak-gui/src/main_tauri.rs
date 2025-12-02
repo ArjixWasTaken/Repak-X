@@ -12,11 +12,7 @@ mod character_data;
 mod p2p_sharing;
 mod p2p_libp2p;
 mod p2p_manager;
-mod p2p_relay;
-mod p2p_security;
-mod p2p_stream;
-mod p2p_protocol;
-mod ip_obfuscation;
+mod p2p_webrtc;
 
 use uasset_detection::{detect_mesh_files_async, detect_texture_files_async, detect_static_mesh_files_async};
 use log::{info, warn, error};

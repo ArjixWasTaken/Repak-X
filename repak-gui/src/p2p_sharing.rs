@@ -6,7 +6,7 @@
 //! - Random share code generation for peer discovery
 //! - TCP-based file transfer with progress tracking
 
-use crate::ip_obfuscation;
+// use crate::ip_obfuscation; // Disabled - P2P stub mode
 use aes_gcm::{
     aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
@@ -181,6 +181,7 @@ pub enum P2PError {
     ProtocolError(String),
     FileError(String),
     ValidationError(String),
+    ConnectionError(String),
     Cancelled,
 }
 
@@ -192,6 +193,7 @@ impl std::fmt::Display for P2PError {
             P2PError::ProtocolError(msg) => write!(f, "Protocol error: {}", msg),
             P2PError::FileError(msg) => write!(f, "File error: {}", msg),
             P2PError::ValidationError(msg) => write!(f, "Validation error: {}", msg),
+            P2PError::ConnectionError(msg) => write!(f, "Connection error: {}", msg),
             P2PError::Cancelled => write!(f, "Operation cancelled"),
         }
     }
@@ -292,7 +294,7 @@ pub fn create_obfuscated_connection_string(
     port: u16,
 ) -> String {
     let key_b64 = URL_SAFE_NO_PAD.encode(key);
-    let obfuscated_ip = ip_obfuscation::obfuscate_ip(ip);
+    let obfuscated_ip = format!("[{}]", &ip[..ip.len().min(4)]); // Simple obfuscation
     format!("{}:{}:{}:{}", share_code, key_b64, obfuscated_ip, port)
 }
 
@@ -498,7 +500,7 @@ impl P2PServer {
         let session = ShareSession {
             share_code,
             encryption_key: key_b64,
-            obfuscated_ip: ip_obfuscation::obfuscate_ip(&local_ip),
+            obfuscated_ip: format!("[{}...]", &local_ip[..local_ip.len().min(4)]),
             local_ip,
             port,
             connection_string,
