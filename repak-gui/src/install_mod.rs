@@ -520,23 +520,34 @@ pub static AES_KEY: LazyLock<AesKey> = LazyLock::new(|| {
 
 fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
     let mut new_mods = Vec::<InstallableMod>::new();
+    let mut processed_mods = std::collections::HashSet::new();
+    
     for entry in WalkDir::new(path) {
         let entry = entry.expect("Failed to read directory entry");
-        let path = entry.path();
-        if path.is_file() {
-            let pak_path = path.with_extension("pak");
-            let utoc_path = path.with_extension("utoc");
-            let ucas_path = path.with_extension("ucas");
+        let file_path = entry.path();
+        
+        // Only process .pak files
+        if file_path.is_file() && file_path.extension().and_then(|s| s.to_str()) == Some("pak") {
+            let mod_base_name = file_path.file_stem().unwrap().to_str().unwrap().to_string();
+            
+            // Skip if we've already processed this mod
+            if processed_mods.contains(&mod_base_name) {
+                continue;
+            }
+            processed_mods.insert(mod_base_name.clone());
+            
+            let utoc_path = file_path.with_extension("utoc");
+            let ucas_path = file_path.with_extension("ucas");
 
             // Check if this is an iostore mod (has all three files: pak, utoc, ucas)
-            if pak_path.exists() && utoc_path.exists() && ucas_path.exists() {
+            if utoc_path.exists() && ucas_path.exists() {
                 // This is an iostore mod - just copy the files, don't go through repak workflow
                 let builder = repak::PakBuilder::new()
                     .key(AES_KEY.clone().0)
-                    .reader(&mut BufReader::new(File::open(&pak_path).unwrap()));
+                    .reader(&mut BufReader::new(File::open(&file_path).unwrap()));
 
                 if let Ok(builder) = builder {
-                    let files = read_utoc(&utoc_path, &builder, &pak_path);
+                    let files = read_utoc(&utoc_path, &builder, &file_path);
                     let files = files
                         .iter()
                         .map(|x| x.file_path.clone())
@@ -545,13 +556,13 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     let modtype = get_current_pak_characteristics(files);
 
                     let installable_mod = InstallableMod {
-                        mod_name: pak_path.file_stem().unwrap().to_str().unwrap().to_string(),
+                        mod_name: mod_base_name,
                         mod_type: modtype.to_string(),
                         repak: false,  // Don't use repak workflow for iostore mods
                         fix_mesh: false,
                         is_dir: false,
                         reader: Some(builder),
-                        mod_path: pak_path.to_path_buf(),
+                        mod_path: file_path.to_path_buf(),
                         mount_point: "../../../".to_string(),
                         path_hash_seed: "00000000".to_string(),
                         total_files: len,
@@ -565,11 +576,11 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     new_mods.push(installable_mod);
                 }
             }
-            // Only process .pak files (skip .utoc and .ucas files)
-            else if path.extension().and_then(|s| s.to_str()) == Some("pak") {
+            // This is a standalone .pak file
+            else {
                 let builder = repak::PakBuilder::new()
                     .key(AES_KEY.clone().0)
-                    .reader(&mut BufReader::new(File::open(path).unwrap()));
+                    .reader(&mut BufReader::new(File::open(file_path).unwrap()));
 
                 if let Ok(builder) = builder {
                     let files = builder.files();
@@ -584,14 +595,14 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     let auto_fix_textures = detect_texture_files(&files);
 
                     let installable_mod = InstallableMod {
-                        mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
+                        mod_name: mod_base_name,
                         mod_type: modtype.to_string(),
                         repak: !is_audio_or_movie,  // Only use repak if NOT Audio/Movies
                         fix_mesh: auto_fix_mesh,
                         fix_textures: auto_fix_textures,
                         is_dir: false,
                         reader: Some(builder),
-                        mod_path: path.to_path_buf(),
+                        mod_path: file_path.to_path_buf(),
                         mount_point: "../../../".to_string(),
                         path_hash_seed: "00000000".to_string(),
                         total_files: len,

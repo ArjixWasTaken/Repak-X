@@ -27,7 +27,7 @@ use std::io;
 use unrar::Archive;
 use std::path::Path;
 use zip::ZipArchive;
-use sevenz_rust::SevenZReader;
+use sevenz_rust::{SevenZReader, Password};
 
 pub fn extract_rar(rar_path: &str, output_dir: &str) -> Result<(), unrar::error::UnrarError> {
     let output_dir = Path::new(output_dir);
@@ -49,7 +49,10 @@ pub fn extract_7z(archive_path: &str, output_dir: &str) -> io::Result<()> {
     let output_path = Path::new(output_dir);
     std::fs::create_dir_all(output_path)?;
     
-    SevenZReader::open(archive_path, Vec::new())
+    // Create empty password (no password protection)
+    let password = Password::empty();
+    
+    SevenZReader::open(archive_path, password)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("Failed to open 7z archive: {}", e)))?
         .for_each_entries(|entry, reader| {
             let entry_path = output_path.join(entry.name());
