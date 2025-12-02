@@ -12,6 +12,7 @@ mod character_data;
 mod p2p_sharing;
 mod p2p_libp2p;
 mod p2p_manager;
+mod p2p_relay;
 mod p2p_security;
 mod p2p_stream;
 mod p2p_protocol;
