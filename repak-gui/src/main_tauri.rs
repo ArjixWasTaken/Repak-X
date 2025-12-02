@@ -40,7 +40,7 @@ struct WatcherState {
 
 /// P2P Sharing state management
 struct P2PState {
-    manager: Mutex<p2p_sharing::P2PManager>,
+    manager: Arc<p2p_manager::UnifiedP2PManager>,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -1910,34 +1910,37 @@ async fn p2p_start_sharing(
     mod_paths: Vec<String>,
     creator: Option<String>,
     p2p_state: State<'_, P2PState>,
-) -> Result<p2p_sharing::ShareSession, String> {
+) -> Result<p2p_libp2p::ShareInfo, String> {
     let paths: Vec<PathBuf> = mod_paths.iter().map(PathBuf::from).collect();
     
-    let mut manager = p2p_state.manager.lock().unwrap();
-    manager.start_sharing(name, description, paths, creator)
+    p2p_state.manager
+        .start_sharing(name, description, paths, creator)
+        .await
         .map_err(|e| e.to_string())
 }
 
 /// Stop sharing
 #[tauri::command]
-async fn p2p_stop_sharing(p2p_state: State<'_, P2PState>) -> Result<(), String> {
-    let mut manager = p2p_state.manager.lock().unwrap();
-    manager.stop_sharing();
-    Ok(())
+async fn p2p_stop_sharing(share_code: String, p2p_state: State<'_, P2PState>) -> Result<(), String> {
+    p2p_state.manager.stop_sharing(&share_code)
+        .map_err(|e| e.to_string())
 }
 
 /// Get current share session info
 #[tauri::command]
-async fn p2p_get_share_session(p2p_state: State<'_, P2PState>) -> Result<Option<p2p_sharing::ShareSession>, String> {
-    let manager = p2p_state.manager.lock().unwrap();
-    Ok(manager.get_share_session())
+async fn p2p_get_share_session(p2p_state: State<'_, P2PState>) -> Result<Option<p2p_libp2p::ShareInfo>, String> {
+    // Return the first active share if any
+    let shares = p2p_state.manager.active_shares.lock();
+    Ok(shares.values().next().map(|s| s.session.clone()).and_then(|session| {
+        // Convert ShareSession to ShareInfo
+        p2p_libp2p::ShareInfo::decode(&session.connection_string).ok()
+    }))
 }
 
 /// Check if currently sharing
 #[tauri::command]
 async fn p2p_is_sharing(p2p_state: State<'_, P2PState>) -> Result<bool, String> {
-    let manager = p2p_state.manager.lock().unwrap();
-    Ok(manager.is_sharing())
+    Ok(!p2p_state.manager.active_shares.lock().is_empty())
 }
 
 /// Start receiving mods from a connection string
@@ -1948,35 +1951,37 @@ async fn p2p_start_receiving(
     state: State<'_, Arc<Mutex<AppState>>>,
     p2p_state: State<'_, P2PState>,
 ) -> Result<(), String> {
-    let state_guard = state.lock().unwrap();
-    let output_dir = state_guard.game_path.clone();
-    drop(state_guard);
+    let output_dir = {
+        let state_guard = state.lock().unwrap();
+        state_guard.game_path.clone()
+    };
     
-    let mut manager = p2p_state.manager.lock().unwrap();
-    manager.start_receiving(&connection_string, output_dir, client_name)
+    p2p_state.manager
+        .start_receiving(&connection_string, output_dir, client_name)
+        .await
         .map_err(|e| e.to_string())
 }
 
 /// Stop receiving
 #[tauri::command]
 async fn p2p_stop_receiving(p2p_state: State<'_, P2PState>) -> Result<(), String> {
-    let mut manager = p2p_state.manager.lock().unwrap();
-    manager.stop_receiving();
+    // Clear all active downloads
+    p2p_state.manager.active_downloads.lock().clear();
     Ok(())
 }
 
 /// Get current transfer progress
 #[tauri::command]
 async fn p2p_get_receive_progress(p2p_state: State<'_, P2PState>) -> Result<Option<p2p_sharing::TransferProgress>, String> {
-    let manager = p2p_state.manager.lock().unwrap();
-    Ok(manager.get_receive_progress())
+    // TODO: Implement progress tracking for libp2p system
+    // For now, return None as the new system doesn't have this implemented yet
+    Ok(None)
 }
 
 /// Check if currently receiving
 #[tauri::command]
 async fn p2p_is_receiving(p2p_state: State<'_, P2PState>) -> Result<bool, String> {
-    let manager = p2p_state.manager.lock().unwrap();
-    Ok(manager.is_receiving())
+    Ok(!p2p_state.manager.active_downloads.lock().is_empty())
 }
 
 /// Create a shareable mod pack info (for preview before sharing)
@@ -1995,7 +2000,8 @@ async fn p2p_create_mod_pack_preview(
 /// Validate a connection string without connecting
 #[tauri::command]
 async fn p2p_validate_connection_string(connection_string: String) -> Result<bool, String> {
-    match p2p_sharing::parse_connection_string(&connection_string) {
+    // Validate base64 ShareInfo format
+    match p2p_libp2p::ShareInfo::decode(&connection_string) {
         Ok(_) => Ok(true),
         Err(e) => Err(e.to_string()),
     }
@@ -2033,7 +2039,11 @@ fn main() {
     
     let state = Arc::new(Mutex::new(load_state()));
     let watcher_state = WatcherState { watcher: Mutex::new(None) };
-    let p2p_state = P2PState { manager: Mutex::new(p2p_sharing::P2PManager::new()) };
+    let p2p_manager = tokio::runtime::Runtime::new()
+        .expect("Failed to create tokio runtime")
+        .block_on(p2p_manager::UnifiedP2PManager::new())
+        .expect("Failed to initialize P2P network");
+    let p2p_state = P2PState { manager: Arc::new(p2p_manager) };
 
     tauri::Builder::default()
         .manage(state)

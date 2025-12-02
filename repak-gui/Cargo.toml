@@ -66,6 +66,7 @@ sysinfo = "0.32"
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
+parking_lot = "0.12"
 
 # P2P Secure Mod Sharing
 aes-gcm = "0.10"

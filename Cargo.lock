@@ -5723,6 +5723,7 @@ dependencies = [
  "notify",
  "once_cell",
  "open",
+ "parking_lot",
  "path-clean",
  "path-slash",
  "rand 0.8.5",

@@ -10,7 +10,8 @@ use libp2p::{Multiaddr, PeerId};
 use log::info;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use tokio::sync::mpsc;
@@ -29,9 +30,9 @@ pub struct UnifiedP2PManager {
     /// Network event loop handle
     network_task: Option<JoinHandle<()>>,
     /// Active share sessions
-    active_shares: Arc<Mutex<HashMap<String, ActiveShare>>>,
+    pub active_shares: Arc<Mutex<HashMap<String, ActiveShare>>>,
     /// Active downloads
-    active_downloads: Arc<Mutex<HashMap<String, ActiveDownload>>>,
+    pub active_downloads: Arc<Mutex<HashMap<String, ActiveDownload>>>,
     /// Event sender for network events
     event_tx: mpsc::UnboundedSender<P2PManagerEvent>,
     /// Event receiver for network events
@@ -39,18 +40,18 @@ pub struct UnifiedP2PManager {
 }
 
 /// Active share session
-struct ActiveShare {
-    session: ShareSession,
-    mod_pack: ShareableModPack,
-    mod_paths: Vec<PathBuf>,
-    peer_id: PeerId,
+pub struct ActiveShare {
+    pub session: ShareSession,
+    pub mod_pack: ShareableModPack,
+    pub mod_paths: Vec<PathBuf>,
+    pub peer_id: PeerId,
 }
 
 /// Active download session
-struct ActiveDownload {
-    share_info: ShareInfo,
-    progress: TransferProgress,
-    output_dir: PathBuf,
+pub struct ActiveDownload {
+    pub share_info: ShareInfo,
+    pub progress: TransferProgress,
+    pub output_dir: PathBuf,
 }
 
 /// Events from the P2P manager
@@ -95,7 +96,7 @@ impl UnifiedP2PManager {
     pub async fn start(&mut self) -> P2PResult<()> {
         // Start listening
         {
-            let mut network = self.network.lock().unwrap();
+            let mut network = self.network.lock();
             network.start_listening()
                 .map_err(|e| P2PError::NetworkError(format!("Failed to start listening: {}", e)))?;
         }
@@ -110,7 +111,7 @@ impl UnifiedP2PManager {
 
         // Bootstrap the DHT
         {
-            let mut network = self.network.lock().unwrap();
+            let mut network = self.network.lock();
             network.bootstrap()
                 .map_err(|e| P2PError::NetworkError(format!("Failed to bootstrap: {}", e)))?;
         }
@@ -126,7 +127,7 @@ impl UnifiedP2PManager {
     ) {
         loop {
             let event = {
-                let mut net = network.lock().unwrap();
+                let mut net = network.lock();
                 // This is a blocking operation, so we need to be careful
                 // In a real implementation, you'd want to use proper async handling
                 tokio::task::block_in_place(|| {
@@ -163,7 +164,7 @@ impl UnifiedP2PManager {
 
     /// Start sharing a mod pack (internet-wide)
     pub async fn start_sharing(
-        &mut self,
+        &self,
         name: String,
         description: String,
         mod_paths: Vec<PathBuf>,
@@ -184,7 +185,7 @@ impl UnifiedP2PManager {
 
         // Get our peer ID and addresses
         let (peer_id, addresses) = {
-            let network = self.network.lock().unwrap();
+            let network = self.network.lock();
             let peer_id = network.local_peer_id();
             let mut addrs = network.listening_addresses();
             addrs.extend(network.external_addresses());
@@ -201,7 +202,7 @@ impl UnifiedP2PManager {
 
         // Advertise in DHT
         {
-            let mut network = self.network.lock().unwrap();
+            let mut network = self.network.lock();
             network.advertise_share(&share_code)
                 .map_err(|e| P2PError::NetworkError(format!("Failed to advertise: {}", e)))?;
         }
@@ -225,7 +226,7 @@ impl UnifiedP2PManager {
             active: true,
         };
 
-        self.active_shares.lock().unwrap().insert(
+        self.active_shares.lock().insert(
             share_code.clone(),
             ActiveShare {
                 session: session.clone(),
@@ -242,15 +243,15 @@ impl UnifiedP2PManager {
     }
 
     /// Stop sharing a mod pack
-    pub fn stop_sharing(&mut self, share_code: &str) -> P2PResult<()> {
-        self.active_shares.lock().unwrap().remove(share_code);
+    pub fn stop_sharing(&self, share_code: &str) -> P2PResult<()> {
+        self.active_shares.lock().remove(share_code);
         info!("Stopped sharing: {}", share_code);
         Ok(())
     }
 
     /// Start downloading a mod pack from a share code
     pub async fn start_receiving(
-        &mut self,
+        &self,
         connection_string: &str,
         output_dir: PathBuf,
         client_name: Option<String>,
@@ -261,12 +262,12 @@ impl UnifiedP2PManager {
 
         // Search for peer in DHT
         {
-            let mut network = self.network.lock().unwrap();
+            let mut network = self.network.lock();
             network.find_peer_by_share_code(&share_info.share_code);
         }
 
         // Store download info
-        self.active_downloads.lock().unwrap().insert(
+        self.active_downloads.lock().insert(
             share_info.share_code.clone(),
             ActiveDownload {
                 share_info: share_info.clone(),
@@ -286,11 +287,10 @@ impl UnifiedP2PManager {
         Ok(())
     }
 
-    /// Get current share session
+    /// Get share session
     pub fn get_share_session(&self, share_code: &str) -> Option<ShareSession> {
         self.active_shares
             .lock()
-            .unwrap()
             .get(share_code)
             .map(|s| s.session.clone())
     }
@@ -299,31 +299,29 @@ impl UnifiedP2PManager {
     pub fn get_transfer_progress(&self, share_code: &str) -> Option<TransferProgress> {
         self.active_downloads
             .lock()
-            .unwrap()
             .get(share_code)
             .map(|d| d.progress.clone())
     }
 
     /// Check if currently sharing
     pub fn is_sharing(&self, share_code: &str) -> bool {
-        self.active_shares.lock().unwrap().contains_key(share_code)
+        self.active_shares.lock().contains_key(share_code)
     }
 
     /// Check if currently receiving
     pub fn is_receiving(&self, share_code: &str) -> bool {
-        self.active_downloads.lock().unwrap().contains_key(share_code)
+        self.active_downloads.lock().contains_key(share_code)
     }
 
     /// Get local peer ID
     pub fn local_peer_id(&self) -> String {
-        self.network.lock().unwrap().local_peer_id().to_string()
+        self.network.lock().local_peer_id().to_string()
     }
 
     /// Get listening addresses
     pub fn listening_addresses(&self) -> Vec<String> {
         self.network
             .lock()
-            .unwrap()
             .listening_addresses()
             .iter()
             .map(|a| a.to_string())
@@ -335,7 +333,7 @@ impl UnifiedP2PManager {
         let addr: Multiaddr = relay_addr.parse()
             .map_err(|e| P2PError::ValidationError(format!("Invalid relay address: {}", e)))?;
         
-        self.network.lock().unwrap().connect_to_relay(addr)
+        self.network.lock().connect_to_relay(addr)
             .map_err(|e| P2PError::NetworkError(format!("Failed to connect to relay: {}", e)))?;
         
         Ok(())
@@ -353,7 +351,7 @@ impl UnifiedP2PManager {
     ) -> P2PResult<()> {
         // Get share info
         let (mod_pack, mod_paths) = {
-            let shares = self.active_shares.lock().unwrap();
+            let shares = self.active_shares.lock();
             let share = shares.get(share_code)
                 .ok_or_else(|| P2PError::ValidationError("Share not found".to_string()))?;
             (share.mod_pack.clone(), share.mod_paths.clone())

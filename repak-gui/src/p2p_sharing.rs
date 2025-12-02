@@ -101,8 +101,7 @@ pub struct ShareSession {
     pub obfuscated_ip: String,
     /// Port listening on
     pub port: u16,
-    /// Full connection string for sharing (internal use only - not serialized to frontend)
-    #[serde(skip_serializing)]
+    /// Full connection string for sharing
     pub connection_string: String,
     /// Obfuscated connection string for display purposes
     pub obfuscated_connection_string: String,
