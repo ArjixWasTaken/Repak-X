@@ -149,7 +149,21 @@ impl UnifiedP2PManager {
                         info!("Listening on: {}", addr);
                     }
                     P2PNetworkEvent::PeerConnected(peer_id) => {
+                        info!("Peer connected: {}", peer_id);
                         let _ = event_tx.send(P2PManagerEvent::PeerConnected(peer_id));
+                        
+                        // Check if we're waiting to download from this peer
+                        let downloads = active_downloads.lock();
+                        let should_request = downloads.iter().any(|(_, d)| {
+                            d.share_info.peer_id.parse::<PeerId>().ok() == Some(peer_id)
+                        });
+                        drop(downloads);
+                        
+                        if should_request {
+                            info!("Requesting pack info from newly connected peer {}", peer_id);
+                            let mut net = network.lock();
+                            net.request_pack_info(peer_id);
+                        }
                     }
                     P2PNetworkEvent::SharePeerFound(peer_id) => {
                         info!("Found peer for share: {}", peer_id);
@@ -536,9 +550,7 @@ impl UnifiedP2PManager {
                         warn!("Failed to dial peer {}: {}", peer_id, e);
                     } else {
                         info!("Dialing peer {} at {}", peer_id, addr);
-                        
-                        // Request pack info
-                        network.request_pack_info(peer_id);
+                        // Don't request pack info yet - wait for PeerConnected event
                         break;
                     }
                 }
