@@ -1973,9 +1973,14 @@ async fn p2p_stop_receiving(p2p_state: State<'_, P2PState>) -> Result<(), String
 /// Get current transfer progress
 #[tauri::command]
 async fn p2p_get_receive_progress(p2p_state: State<'_, P2PState>) -> Result<Option<p2p_sharing::TransferProgress>, String> {
-    // TODO: Implement progress tracking for libp2p system
-    // For now, return None as the new system doesn't have this implemented yet
-    Ok(None)
+    let downloads = p2p_state.manager.active_downloads.lock();
+    
+    // Return the first active download's progress (typically only one at a time)
+    if let Some((_, download)) = downloads.iter().next() {
+        Ok(Some(download.progress.clone()))
+    } else {
+        Ok(None)
+    }
 }
 
 /// Check if currently receiving

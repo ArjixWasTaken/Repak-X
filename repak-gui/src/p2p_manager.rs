@@ -180,27 +180,34 @@ fn create_zip(paths: &[PathBuf], zip_path: &PathBuf) -> P2PResult<()> {
 
 async fn upload_to_fileio(path: &PathBuf) -> P2PResult<String> {
     // file.io provides direct download links without authentication
-    let client = reqwest::Client::new();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(300)) // 5 minute timeout for large files
+        .build()
+        .map_err(|e| P2PError::ConnectionError(format!("Failed to create HTTP client: {}", e)))?;
     
     let file_data = std::fs::read(path).map_err(|e| P2PError::FileError(e.to_string()))?;
     let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
     let file_size = file_data.len();
     
-    info!("[Share] Uploading {} ({} bytes) to file.io...", file_name, file_size);
+    info!("[Share] Uploading {} ({} bytes / {:.2} MB) to file.io...", file_name, file_size, file_size as f64 / 1024.0 / 1024.0);
     
     let part = reqwest::multipart::Part::bytes(file_data)
-        .file_name(file_name)
+        .file_name(file_name.clone())
         .mime_str("application/zip").map_err(|e| P2PError::ConnectionError(e.to_string()))?;
     let form = reqwest::multipart::Form::new().part("file", part);
 
+    info!("[Share] Sending upload request to file.io...");
     let response = client.post("https://file.io")
         .multipart(form)
         .send().await.map_err(|e| P2PError::ConnectionError(format!("Failed to send request: {}", e)))?;
 
     // Check status code first
     let status = response.status();
+    info!("[Share] file.io response status: {}", status);
+    
     if !status.is_success() {
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        error!("[Share] Upload failed with status {}: {}", status, error_text);
         return Err(P2PError::ConnectionError(format!("Upload failed with status {}: {}", status, error_text)));
     }
 
@@ -212,24 +219,39 @@ async fn upload_to_fileio(path: &PathBuf) -> P2PResult<String> {
 
     // Try to parse as JSON
     let resp: serde_json::Value = serde_json::from_str(&response_text)
-        .map_err(|e| P2PError::ConnectionError(format!("Failed to parse JSON response: {}. Response was: {}", e, response_text)))?;
+        .map_err(|e| {
+            error!("[Share] Failed to parse JSON response: {}. Response was: {}", e, response_text);
+            P2PError::ConnectionError(format!("Failed to parse JSON response: {}. Response was: {}", e, response_text))
+        })?;
 
     info!("[Share] file.io parsed response: {:?}", resp);
 
-    if !resp["success"].as_bool().unwrap_or(false) {
-        return Err(P2PError::ConnectionError(format!("Upload failed: {:?}", resp)));
+    // Check for success field
+    let success = resp["success"].as_bool().unwrap_or(false);
+    if !success {
+        let error_msg = resp["message"].as_str().unwrap_or("Unknown error");
+        error!("[Share] file.io upload failed: {}", error_msg);
+        return Err(P2PError::ConnectionError(format!("Upload failed: {}", error_msg)));
     }
 
     // file.io returns a direct download link
     let download_url = resp["link"].as_str()
-        .ok_or_else(|| P2PError::ConnectionError("No download URL in response".into()))?;
+        .ok_or_else(|| {
+            error!("[Share] No download URL in response: {:?}", resp);
+            P2PError::ConnectionError("No download URL in response".into())
+        })?;
     
-    info!("[Share] Upload complete! URL: {}", download_url);
+    info!("[Share] Upload complete! URL: {} (expires in 14 days)", download_url);
     Ok(download_url.to_string())
 }
 
 async fn download_and_extract(url: &str, out_dir: &PathBuf, dl: Arc<Mutex<HashMap<String, ActiveDownload>>>, code: &str) -> Result<(), String> {
-    let client = reqwest::Client::new();
+    info!("[Share] Starting download from: {}", url);
+    
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(600)) // 10 minute timeout for downloads
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     
     // Update status
     if let Some(d) = dl.lock().get_mut(code) {
@@ -237,39 +259,84 @@ async fn download_and_extract(url: &str, out_dir: &PathBuf, dl: Arc<Mutex<HashMa
         d.progress.current_file = "Downloading...".into();
     }
 
-    // Download
-    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    // Download with better error handling
+    info!("[Share] Sending download request...");
+    let resp = client.get(url).send().await.map_err(|e| {
+        error!("[Share] Download request failed: {}", e);
+        format!("Failed to download: {}", e)
+    })?;
+    
+    let status = resp.status();
+    info!("[Share] Download response status: {}", status);
+    
+    if !status.is_success() {
+        let error_msg = format!("Download failed with status: {}", status);
+        error!("[Share] {}", error_msg);
+        return Err(error_msg);
+    }
+    
     let total = resp.content_length().unwrap_or(0);
+    info!("[Share] Download size: {} bytes ({:.2} MB)", total, total as f64 / 1024.0 / 1024.0);
     
     if let Some(d) = dl.lock().get_mut(code) {
         d.progress.total_bytes = total;
     }
 
-    let bytes = resp.bytes().await.map_err(|e| e.to_string())?;
+    info!("[Share] Downloading file...");
+    let bytes = resp.bytes().await.map_err(|e| {
+        error!("[Share] Failed to read download bytes: {}", e);
+        format!("Failed to read download: {}", e)
+    })?;
+    
+    info!("[Share] Downloaded {} bytes", bytes.len());
     
     if let Some(d) = dl.lock().get_mut(code) {
         d.progress.bytes_transferred = bytes.len() as u64;
         d.progress.current_file = "Extracting...".into();
+        d.progress.status = TransferStatus::Verifying;
     }
 
     // Save and extract
     let temp_zip = out_dir.join("_temp_download.zip");
-    std::fs::create_dir_all(out_dir).map_err(|e| e.to_string())?;
-    std::fs::write(&temp_zip, &bytes).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(out_dir).map_err(|e| {
+        error!("[Share] Failed to create output directory: {}", e);
+        e.to_string()
+    })?;
+    
+    info!("[Share] Saving zip to: {}", temp_zip.display());
+    std::fs::write(&temp_zip, &bytes).map_err(|e| {
+        error!("[Share] Failed to write zip file: {}", e);
+        e.to_string()
+    })?;
 
     // Extract zip
-    let file = std::fs::File::open(&temp_zip).map_err(|e| e.to_string())?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    info!("[Share] Opening zip archive...");
+    let file = std::fs::File::open(&temp_zip).map_err(|e| {
+        error!("[Share] Failed to open zip: {}", e);
+        e.to_string()
+    })?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| {
+        error!("[Share] Failed to read zip archive: {}", e);
+        format!("Invalid or corrupted zip file: {}", e)
+    })?;
     
     let total_files = archive.len();
+    info!("[Share] Extracting {} files...", total_files);
+    
     if let Some(d) = dl.lock().get_mut(code) {
         d.progress.total_files = total_files;
+        d.progress.status = TransferStatus::Transferring;
     }
 
     for i in 0..archive.len() {
-        let mut file = archive.by_index(i).map_err(|e| e.to_string())?;
+        let mut file = archive.by_index(i).map_err(|e| {
+            error!("[Share] Failed to access file {} in zip: {}", i, e);
+            e.to_string()
+        })?;
         let name = file.name().to_string();
         let out_path = out_dir.join(&name);
+        
+        info!("[Share] Extracting: {} ({}/{})", name, i + 1, total_files);
         
         if let Some(d) = dl.lock().get_mut(code) {
             d.progress.current_file = name.clone();
@@ -277,17 +344,28 @@ async fn download_and_extract(url: &str, out_dir: &PathBuf, dl: Arc<Mutex<HashMa
         }
 
         if let Some(parent) = out_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            std::fs::create_dir_all(parent).map_err(|e| {
+                error!("[Share] Failed to create directory: {}", e);
+                e.to_string()
+            })?;
         }
         
-        let mut out_file = std::fs::File::create(&out_path).map_err(|e| e.to_string())?;
-        std::io::copy(&mut file, &mut out_file).map_err(|e| e.to_string())?;
-        info!("[Share] Extracted: {}", name);
+        let mut out_file = std::fs::File::create(&out_path).map_err(|e| {
+            error!("[Share] Failed to create output file {}: {}", name, e);
+            e.to_string()
+        })?;
+        std::io::copy(&mut file, &mut out_file).map_err(|e| {
+            error!("[Share] Failed to extract {}: {}", name, e);
+            e.to_string()
+        })?;
+        info!("[Share] ✓ Extracted: {}", name);
     }
 
     // Cleanup
+    info!("[Share] Cleaning up temporary files...");
     let _ = std::fs::remove_file(&temp_zip);
     
+    info!("[Share] Download and extraction complete!");
     Ok(())
 }
 
