@@ -193,12 +193,28 @@ async fn upload_to_fileio(path: &PathBuf) -> P2PResult<String> {
         .mime_str("application/zip").map_err(|e| P2PError::ConnectionError(e.to_string()))?;
     let form = reqwest::multipart::Form::new().part("file", part);
 
-    let resp: serde_json::Value = client.post("https://file.io")
+    let response = client.post("https://file.io")
         .multipart(form)
-        .send().await.map_err(|e| P2PError::ConnectionError(e.to_string()))?
-        .json().await.map_err(|e| P2PError::ConnectionError(e.to_string()))?;
+        .send().await.map_err(|e| P2PError::ConnectionError(format!("Failed to send request: {}", e)))?;
 
-    info!("[Share] file.io response: {:?}", resp);
+    // Check status code first
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(P2PError::ConnectionError(format!("Upload failed with status {}: {}", status, error_text)));
+    }
+
+    // Get response text first for debugging
+    let response_text = response.text().await
+        .map_err(|e| P2PError::ConnectionError(format!("Failed to read response: {}", e)))?;
+    
+    info!("[Share] file.io raw response: {}", response_text);
+
+    // Try to parse as JSON
+    let resp: serde_json::Value = serde_json::from_str(&response_text)
+        .map_err(|e| P2PError::ConnectionError(format!("Failed to parse JSON response: {}. Response was: {}", e, response_text)))?;
+
+    info!("[Share] file.io parsed response: {:?}", resp);
 
     if !resp["success"].as_bool().unwrap_or(false) {
         return Err(P2PError::ConnectionError(format!("Upload failed: {:?}", resp)));
