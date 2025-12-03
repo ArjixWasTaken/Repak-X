@@ -165,13 +165,47 @@ fn create_zip(paths: &[PathBuf], zip_path: &PathBuf) -> P2PResult<()> {
     let mut zip = zip::ZipWriter::new(file);
     let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
 
+    // Track files we've already added to avoid duplicates
+    let mut added_files = std::collections::HashSet::new();
+
     for path in paths {
         if path.is_file() {
-            let name = path.file_name().unwrap_or_default().to_string_lossy();
-            info!("[Share] Adding to zip: {}", name);
-            zip.start_file(name.to_string(), options).map_err(|e| P2PError::FileError(e.to_string()))?;
-            let data = std::fs::read(path).map_err(|e| P2PError::FileError(e.to_string()))?;
-            zip.write_all(&data).map_err(|e| P2PError::FileError(e.to_string()))?;
+            // Add the main file
+            let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            if added_files.insert(name.clone()) {
+                info!("[Share] Adding to zip: {}", name);
+                zip.start_file(name.clone(), options).map_err(|e| P2PError::FileError(e.to_string()))?;
+                let data = std::fs::read(path).map_err(|e| P2PError::FileError(e.to_string()))?;
+                zip.write_all(&data).map_err(|e| P2PError::FileError(e.to_string()))?;
+            }
+
+            // If this is a .pak file, check for accompanying .ucas and .utoc files
+            if name.ends_with(".pak") {
+                let base_name = &name[..name.len() - 4]; // Remove ".pak"
+                let parent_dir = path.parent();
+
+                if let Some(dir) = parent_dir {
+                    // Check for .ucas file
+                    let ucas_name = format!("{}.ucas", base_name);
+                    let ucas_path = dir.join(&ucas_name);
+                    if ucas_path.exists() && added_files.insert(ucas_name.clone()) {
+                        info!("[Share] Adding accompanying file: {}", ucas_name);
+                        zip.start_file(ucas_name, options).map_err(|e| P2PError::FileError(e.to_string()))?;
+                        let data = std::fs::read(&ucas_path).map_err(|e| P2PError::FileError(e.to_string()))?;
+                        zip.write_all(&data).map_err(|e| P2PError::FileError(e.to_string()))?;
+                    }
+
+                    // Check for .utoc file
+                    let utoc_name = format!("{}.utoc", base_name);
+                    let utoc_path = dir.join(&utoc_name);
+                    if utoc_path.exists() && added_files.insert(utoc_name.clone()) {
+                        info!("[Share] Adding accompanying file: {}", utoc_name);
+                        zip.start_file(utoc_name, options).map_err(|e| P2PError::FileError(e.to_string()))?;
+                        let data = std::fs::read(&utoc_path).map_err(|e| P2PError::FileError(e.to_string()))?;
+                        zip.write_all(&data).map_err(|e| P2PError::FileError(e.to_string()))?;
+                    }
+                }
+            }
         }
     }
     zip.finish().map_err(|e| P2PError::FileError(e.to_string()))?;
