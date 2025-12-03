@@ -66,7 +66,7 @@ impl UnifiedP2PManager {
         let share_info = ShareInfo {
             peer_id: self.instance_id.clone(),
             addresses: vec![download_url.clone()],
-            encryption_key: String::new(),
+            encryption_key: "cloud-hosted".to_string(), // Placeholder for cloud hosting (no encryption needed)
             share_code: code.clone(),
         };
 
@@ -74,7 +74,7 @@ impl UnifiedP2PManager {
         
         let sess = ShareSession {
             share_code: code.clone(),
-            encryption_key: String::new(),
+            encryption_key: share_info.encryption_key.clone(),
             local_ip: "cloud".into(),
             obfuscated_ip: "[Cloud Hosted]".into(),
             port: 0,
@@ -361,15 +361,26 @@ async fn download_and_extract(url: &str, out_dir: &PathBuf, dl: Arc<Mutex<HashMa
 }
 
 pub fn validate_connection_string(s: &str) -> P2PResult<bool> {
+    info!("[Share] Validating connection string: {} chars", s.len());
+    
     // Helper: try to decode a ShareInfo and ensure it has at least one address
     fn try_decode(input: &str) -> P2PResult<bool> {
-        ShareInfo::decode(input)
-            .map(|info| !info.addresses.is_empty())
-            .map_err(|e| P2PError::ValidationError(format!("{}", e)))
+        match ShareInfo::decode(input) {
+            Ok(info) => {
+                info!("[Share] Decoded ShareInfo - peer_id: {}, addresses: {:?}, encryption_key: {}, share_code: {}", 
+                    info.peer_id, info.addresses, info.encryption_key, info.share_code);
+                Ok(!info.addresses.is_empty())
+            },
+            Err(e) => {
+                error!("[Share] Failed to decode: {}", e);
+                Err(P2PError::ValidationError(format!("{}", e)))
+            }
+        }
     }
 
     // 1) First try the raw string as-is
     if let Ok(valid) = try_decode(s) {
+        info!("[Share] Validation result: {}", valid);
         return Ok(valid);
     }
 
@@ -382,8 +393,10 @@ pub fn validate_connection_string(s: &str) -> P2PResult<bool> {
 
     if let Some(i) = start_idx {
         let candidate = &trimmed[i..];
+        info!("[Share] Trying trimmed candidate: {} chars", candidate.len());
         return try_decode(candidate);
     }
 
+    error!("[Share] Validation failed - invalid format");
     Err(P2PError::ValidationError("Invalid connection string".to_string()))
 }
