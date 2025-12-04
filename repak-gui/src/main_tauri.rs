@@ -396,6 +396,8 @@ struct InstallableModInfo {
     auto_fix_texture: bool,
     auto_fix_serialize_size: bool,
     auto_to_repak: bool,
+    iostore: bool,  // True if this is an IoStore mod (.pak + .utoc + .ucas)
+    repak: bool,    // True if this should go through repak workflow
 }
 
 #[tauri::command]
@@ -629,6 +631,14 @@ async fn parse_dropped_files(
                                                 drop(uasset_temp_dir);
                                                 drop(temp_dir);
                                                 
+                                                // Check if archive contains IoStore files
+                                                let utoc_exists = entry_path.with_extension("utoc").exists();
+                                                let ucas_exists = entry_path.with_extension("ucas").exists();
+                                                let is_iostore_archive = utoc_exists && ucas_exists;
+                                                
+                                                // Check if it's Audio/Movie mod
+                                                let is_audio_or_movie = mod_type.contains("Audio") || mod_type.contains("Movies");
+                                                
                                                 // Return the detected type and flags
                                                 return Ok(vec![InstallableModInfo {
                                                     mod_name,
@@ -638,7 +648,9 @@ async fn parse_dropped_files(
                                                     auto_fix_mesh: has_skeletal_mesh,
                                                     auto_fix_texture: has_texture,
                                                     auto_fix_serialize_size: has_static_mesh,
-                                                    auto_to_repak: true,
+                                                    auto_to_repak: !is_iostore_archive && !is_audio_or_movie,
+                                                    iostore: is_iostore_archive,
+                                                    repak: !is_iostore_archive && !is_audio_or_movie,
                                                 }]);
                                             }
                                         }
@@ -776,31 +788,49 @@ async fn parse_dropped_files(
                         ("Unknown".to_string(), false, false, false)
                     }
                 } else {
-                    ("Unknown".to_string(), false, false, false)
+                    mods.push(InstallableModInfo {
+                        mod_name,
+                        mod_type: "Unknown".to_string(),
+                        is_dir: path.is_dir(),
+                        path: path_str,
+                        auto_fix_mesh: false,
+                        auto_fix_texture: false,
+                        auto_fix_serialize_size: false,
+                        auto_to_repak: false,
+                        iostore: false,
+                        repak: false,
+                    });
                 }
             } else {
-                ("Unknown".to_string(), false, false, false)
-            }
-            } else {
-                ("Unknown".to_string(), false, false, false)
+                mods.push(InstallableModInfo {
+                    mod_name,
+                    mod_type: "Unknown".to_string(),
+                    is_dir: path.is_dir(),
+                    path: path_str,
+                    auto_fix_mesh: false,
+                    auto_fix_texture: false,
+                    auto_fix_serialize_size: false,
+                    auto_to_repak: false,
+                    iostore: false,
+                    repak: false,
+                });
             }
         } else {
-            ("Unknown".to_string(), false, false, false)
+            mods.push(InstallableModInfo {
+                mod_name,
+                mod_type: "Unknown".to_string(),
+                is_dir: path.is_dir(),
+                path: path_str,
+                auto_fix_mesh: false,
+                auto_fix_texture: false,
+                auto_fix_serialize_size: false,
+                auto_to_repak: false,
+                iostore: false,
+                repak: false,
+            });
         };
         
-        // For .pak files, auto-enable repak
-        let auto_to_repak = path.extension().and_then(|s| s.to_str()) == Some("pak");
-        
-        mods.push(InstallableModInfo {
-            mod_name,
-            mod_type,
-            is_dir: path.is_dir(),
-            path: path_str,
-            auto_fix_mesh,
-            auto_fix_texture,
-            auto_fix_serialize_size,
-            auto_to_repak,
-        });
+        Ok(mods)
     }
     
     Ok(mods)

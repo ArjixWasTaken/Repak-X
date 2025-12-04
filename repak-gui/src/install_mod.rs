@@ -4,7 +4,7 @@ use crate::install_mod::install_mod_logic::archives::{extract_zip, extract_rar, 
 use crate::uasset_detection::{detect_mesh_files, detect_texture_files};
 use crate::utils::{collect_files, get_current_pak_characteristics};
 use crate::utoc_utils::read_utoc;
-use log::{debug, error};
+use log::{debug, error, warn};
 use repak::utils::AesKey;
 use repak::Compression::Oodle;
 use repak::{Compression, PakReader};
@@ -553,13 +553,18 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         .map(|x| x.file_path.clone())
                         .collect::<Vec<_>>();
                     let len = files.len();
-                    let modtype = get_current_pak_characteristics(files);
+                    let modtype = get_current_pak_characteristics(files.clone());
+                    
+                    // Auto-detect mesh and texture files even in IoStore mods
+                    let auto_fix_mesh = detect_mesh_files(&files);
+                    let auto_fix_textures = detect_texture_files(&files);
 
                     let installable_mod = InstallableMod {
                         mod_name: mod_base_name,
-                        mod_type: modtype.to_string(),
+                        mod_type: format!("{} (IoStore)", modtype),  // Add IoStore indicator to type
                         repak: false,  // Don't use repak workflow for iostore mods
-                        fix_mesh: false,
+                        fix_mesh: auto_fix_mesh,
+                        fix_textures: auto_fix_textures,
                         is_dir: false,
                         reader: Some(builder),
                         mod_path: file_path.to_path_buf(),
@@ -588,15 +593,23 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     let modtype = get_current_pak_characteristics(files.clone());
                     
                     // Check if this is an Audio or Movies mod (these should skip repak workflow)
+                    // TODO: Implement proper detection criteria for Audio/Movie mods
                     let is_audio_or_movie = modtype.contains("Audio") || modtype.contains("Movies");
                     
                     // Auto-detect mesh and texture files
                     let auto_fix_mesh = detect_mesh_files(&files);
                     let auto_fix_textures = detect_texture_files(&files);
+                    
+                    // Add indicator to mod type for PAK-only mods
+                    let display_type = if is_audio_or_movie {
+                        format!("{} (PAK Only)", modtype)
+                    } else {
+                        modtype.to_string()
+                    };
 
                     let installable_mod = InstallableMod {
                         mod_name: mod_base_name,
-                        mod_type: modtype.to_string(),
+                        mod_type: display_type,
                         repak: !is_audio_or_movie,  // Only use repak if NOT Audio/Movies
                         fix_mesh: auto_fix_mesh,
                         fix_textures: auto_fix_textures,
@@ -628,7 +641,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
         .iter()
         .map(|path| {
             let is_dir = path.clone().is_dir();
-            let extension = path.extension().unwrap_or_default();
+            let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
             let is_archive = extension == "zip" || extension == "rar" || extension == "7z";
 
             let mut modtype = "Unknown".to_string();
@@ -636,21 +649,52 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             let mut len = 1;
             let mut auto_fix_mesh = false;
             let mut auto_fix_textures = false;
+            let mut is_iostore = false;
 
             if !is_dir && !is_archive {
+                // Check if this is an IoStore mod (has .utoc and .ucas companions)
+                if extension == "pak" {
+                    let utoc_path = path.with_extension("utoc");
+                    let ucas_path = path.with_extension("ucas");
+                    is_iostore = utoc_path.exists() && ucas_path.exists();
+                }
+                
                 let builder = repak::PakBuilder::new()
                     .key(AES_KEY.clone().0)
                     .reader(&mut BufReader::new(File::open(path.clone()).unwrap()));
                 match builder {
                     Ok(builder) => {
                         pak = Some(builder.clone());
-                        let files = builder.files();
-                        modtype = get_current_pak_characteristics(files.clone());
+                        
+                        // If it's IoStore, read files from .utoc
+                        let files = if is_iostore {
+                            let utoc_path = path.with_extension("utoc");
+                            let utoc_files = read_utoc(&utoc_path, &builder, path);
+                            utoc_files.iter().map(|x| x.file_path.clone()).collect::<Vec<_>>()
+                        } else {
+                            builder.files()
+                        };
+                        
+                        let base_modtype = get_current_pak_characteristics(files.clone());
                         len = files.len();
                         
                         // Auto-detect mesh and texture files in pak files
                         auto_fix_mesh = detect_mesh_files(&files);
                         auto_fix_textures = detect_texture_files(&files);
+                        
+                        // Add indicators to mod type
+                        if is_iostore {
+                            modtype = format!("{} (IoStore)", base_modtype);
+                        } else {
+                            // Check if this is an Audio or Movies mod (PAK Only)
+                            // TODO: Implement proper detection criteria for Audio/Movie mods
+                            let is_audio_or_movie = base_modtype.contains("Audio") || base_modtype.contains("Movies");
+                            modtype = if is_audio_or_movie {
+                                format!("{} (PAK Only)", base_modtype)
+                            } else {
+                                base_modtype
+                            };
+                        }
                     }
                     Err(e) => {
                         error!("Error reading pak file: {}", e);
@@ -700,7 +744,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             Ok(InstallableMod {
                 mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
                 mod_type: modtype,
-                repak: !is_dir,
+                repak: !is_dir && !is_iostore,  // Don't repak IoStore mods
                 fix_mesh: auto_fix_mesh,
                 fix_textures: auto_fix_textures,
                 is_dir,
@@ -710,6 +754,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 path_hash_seed: "00000000".to_string(),
                 total_files: len,
                 is_archived: is_archive,
+                iostore: is_iostore,  // Mark as IoStore so it gets copied directly
                 ..Default::default()
             })
         })
@@ -724,7 +769,37 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
 }
 
 pub fn map_paths_to_mods(paths: &[PathBuf]) -> Vec<InstallableMod> {
-    let installable_mods = map_to_mods_internal(paths);
+    // Pre-process paths to handle .utoc/.ucas files
+    let mut processed_paths = Vec::new();
+    let mut seen_bases = std::collections::HashSet::new();
+    
+    for path in paths {
+        let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+        
+        // If it's a .utoc or .ucas file, find the .pak file instead
+        if extension == "utoc" || extension == "ucas" {
+            let pak_path = path.with_extension("pak");
+            if pak_path.exists() {
+                let base_name = pak_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                if !seen_bases.contains(base_name) {
+                    seen_bases.insert(base_name.to_string());
+                    processed_paths.push(pak_path);
+                }
+            } else {
+                // If no .pak file exists, skip this file
+                warn!("Skipping {} - no companion .pak file found", path.display());
+            }
+        } else {
+            // For other files (including .pak), add them normally
+            let base_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            if !seen_bases.contains(base_name) {
+                seen_bases.insert(base_name.to_string());
+                processed_paths.push(path.clone());
+            }
+        }
+    }
+    
+    let installable_mods = map_to_mods_internal(&processed_paths);
     installable_mods
 }
 
