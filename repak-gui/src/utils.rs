@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::option::Option;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::{fs, io};
@@ -57,6 +56,7 @@ pub struct ModCharacteristics {
 
 impl ModCharacteristics {
     /// Format the mod type with hero info for display
+    #[allow(dead_code)]
     pub fn display_type(&self) -> String {
         if self.heroes.is_empty() {
             self.mod_type.clone()
@@ -115,7 +115,7 @@ pub fn get_character_mod_skin(file: &str) -> Option<ModType> {
 }
 /// Get detailed mod characteristics including mod type and all detected heroes
 pub fn get_pak_characteristics_detailed(mod_contents: Vec<String>) -> ModCharacteristics {
-    let mut fallback: Option<String> = None;
+    let mut _fallback: Option<String> = None;
     
     // Track what content types we find
     let mut has_skeletal_mesh = false;
@@ -199,7 +199,7 @@ pub fn get_pak_characteristics_detailed(mod_contents: Vec<String>) -> ModCharact
         if category == "Characters" {
             match get_character_mod_skin(path) {
                 Some(ModType::Custom(skin)) => character_name = Some(skin),
-                Some(ModType::Default(name)) => fallback = Some(name),
+                Some(ModType::Default(name)) => _fallback = Some(name),
                 None => {}
             }
         }

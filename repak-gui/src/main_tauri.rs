@@ -17,7 +17,7 @@ mod p2p_stream;
 mod p2p_protocol;
 mod ip_obfuscation;
 
-use uasset_detection::{detect_mesh_files_async, detect_texture_files_async, detect_static_mesh_files_async, detect_blueprint_files_async};
+use uasset_detection::{detect_mesh_files_async, detect_texture_files_async, detect_static_mesh_files_async};
 use log::{info, warn, error};
 use serde::{Deserialize, Serialize};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
@@ -36,6 +36,7 @@ use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 
 struct WatcherState {
     watcher: Mutex<Option<RecommendedWatcher>>,
+    #[allow(dead_code)]
     last_event_time: Mutex<std::time::Instant>,
 }
 
@@ -1869,7 +1870,7 @@ struct ModDetails {
 }
 
 #[tauri::command]
-async fn get_mod_details(mod_path: String, detect_blueprint: Option<bool>) -> Result<ModDetails, String> {
+async fn get_mod_details(mod_path: String, _detect_blueprint: Option<bool>) -> Result<ModDetails, String> {
     use repak::PakBuilder;
     use repak::utils::AesKey;
     use std::str::FromStr;
@@ -1927,7 +1928,7 @@ async fn get_mod_details(mod_path: String, detect_blueprint: Option<bool>) -> Re
     
     // Determine mod type using the detailed function
     use crate::utils::get_pak_characteristics_detailed;
-    let mut characteristics = get_pak_characteristics_detailed(files.clone());
+    let characteristics = get_pak_characteristics_detailed(files.clone());
     info!("Detected mod type: {}", characteristics.mod_type);
     info!("Character name: {}", characteristics.character_name);
     info!("Category: {}", characteristics.category);
