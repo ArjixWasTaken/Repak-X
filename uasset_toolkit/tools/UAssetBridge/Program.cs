@@ -101,6 +101,7 @@ public class Program
                 "batch_detect_skeletal_mesh" => BatchDetectAssetClass(request.FilePaths, "SkeletalMesh"),
                 "batch_detect_static_mesh" => BatchDetectAssetClass(request.FilePaths, "StaticMesh"),
                 "batch_detect_texture" => BatchDetectTexture(request.FilePaths),
+                "batch_detect_blueprint" => BatchDetectBlueprint(request.FilePaths),
                 // Debug action to dump asset info
                 "debug_asset_info" => DebugAssetInfo(request.FilePath),
                 _ => new UAssetResponse 
@@ -486,6 +487,109 @@ public class Program
             Message = foundMatch ? "Found Texture needing MipGen fix in batch" : "No Texture needing fix found in batch",
             Data = foundMatch
         };
+    }
+
+    private static UAssetResponse BatchDetectBlueprint(List<string>? filePaths)
+    {
+        if (filePaths == null || filePaths.Count == 0)
+            return new UAssetResponse { Success = false, Message = "file_paths required" };
+
+        // Get usmap path from environment
+        string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
+        Usmap? mappings = null;
+        
+        if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
+        {
+            try
+            {
+                mappings = new Usmap(usmapPath);
+            }
+            catch { }
+        }
+
+        // Process files in parallel for maximum speed
+        // Use SkipParsingExports for faster detection (only reads headers + imports)
+        bool foundMatch = filePaths.AsParallel().Any(filePath =>
+        {
+            if (!File.Exists(filePath)) return false;
+            try
+            {
+                // First try with SkipParsingExports (fast, works without full parsing)
+                var asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings, CustomSerializationFlags.SkipParsingExports);
+                return IsBlueprint(asset);
+            }
+            catch
+            {
+                // Fallback to normal loading
+                try
+                {
+                    var asset = new UAsset(filePath, EngineVersion.VER_UE5_3, mappings);
+                    return IsBlueprint(asset);
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        });
+
+        return new UAssetResponse
+        {
+            Success = true,
+            Message = foundMatch ? "Found Blueprint in batch" : "No Blueprint found in batch",
+            Data = foundMatch
+        };
+    }
+
+    private static bool IsBlueprint(UAsset asset)
+    {
+        // Blueprints are identified by:
+        // 1. BlueprintGeneratedClass export type
+        // 2. Imports containing "BlueprintGeneratedClass" or "Blueprint"
+        // 3. Class names ending with "_C" (Blueprint compiled class convention)
+        
+        foreach (var export in asset.Exports)
+        {
+            // Check export type name
+            string exportTypeName = export.GetType().Name;
+            if (exportTypeName.Contains("Blueprint", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            
+            // Check ClassIndex import
+            if (export.ClassIndex.IsImport())
+            {
+                var import = export.ClassIndex.ToImport(asset);
+                if (import != null)
+                {
+                    string className = import.ObjectName?.Value?.Value ?? "";
+                    if (className.Contains("Blueprint", StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+            }
+            
+            // Check export's ObjectName for Blueprint naming convention (_C suffix)
+            string? objectName = export.ObjectName?.Value?.Value;
+            if (!string.IsNullOrEmpty(objectName) && objectName.EndsWith("_C", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+        
+        // Check all imports for Blueprint class references
+        foreach (var imp in asset.Imports)
+        {
+            string impName = imp.ObjectName?.Value?.Value ?? "";
+            if (impName.Contains("Blueprint", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     private static UAssetResponse DetectTexture(string? filePath)

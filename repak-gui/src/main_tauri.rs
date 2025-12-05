@@ -1766,11 +1766,19 @@ async fn get_character_by_skin_id(skin_id: String) -> Result<Option<character_da
     Ok(character_data::get_character_by_skin_id(&skin_id))
 }
 
-/// Update character data from rivalskins.com with progress events
+#[tauri::command]
+async fn refresh_character_cache() -> Result<String, String> {
+    info!("Manually refreshing character data cache...");
+    character_data::refresh_cache();
+    info!("Character data cache refreshed successfully");
+    Ok("Character data cache refreshed successfully".to_string())
+}
+
+/// Update character data from GitHub MarvelRivalsCharacterIDs with progress events
 /// Supports cancellation via cancel_character_update command
 #[tauri::command]
-async fn update_character_data_from_rivalskins(window: Window) -> Result<usize, String> {
-    let _ = window.emit("install_log", "[Character Data] Starting rivalskins.com data fetch...");
+async fn update_character_data_from_github(window: Window) -> Result<usize, String> {
+    let _ = window.emit("install_log", "[Character Data] Starting GitHub data fetch...");
     
     // Create progress callback that emits events
     let window_clone = window.clone();
@@ -1778,7 +1786,7 @@ async fn update_character_data_from_rivalskins(window: Window) -> Result<usize, 
         let _ = window_clone.emit("install_log", format!("[Character Data] {}", msg));
     };
     
-    match character_data::update_from_rivalskins_with_progress(on_progress).await {
+    match character_data::update_from_github_with_progress(on_progress).await {
         Ok(new_count) => {
             let msg = format!("[Character Data] ✓ Complete! {} new skins added.", new_count);
             let _ = window.emit("install_log", &msg);
@@ -1809,19 +1817,13 @@ async fn cancel_character_update() -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn identify_mod_character(file_paths: Vec<String>) -> Result<Option<(String, String)>, String> {
-    Ok(character_data::identify_mod_from_paths(&file_paths))
-}
-
-#[tauri::command]
 async fn get_character_data_path() -> Result<String, String> {
     Ok(character_data::character_data_path().to_string_lossy().to_string())
 }
 
 #[tauri::command]
-async fn refresh_character_cache() -> Result<(), String> {
-    character_data::refresh_cache();
-    Ok(())
+async fn identify_mod_character(file_paths: Vec<String>) -> Result<Option<(String, String)>, String> {
+    Ok(character_data::identify_mod_from_paths(&file_paths))
 }
 
 // ============================================================================
@@ -2214,6 +2216,10 @@ fn main() {
     setup_logging();
     info!("Starting Repak Gui Revamped v{}", env!("CARGO_PKG_VERSION"));
     
+    // Initialize character data cache on startup
+    info!("Initializing character data cache...");
+    character_data::refresh_cache();
+    
     let state = Arc::new(Mutex::new(load_state()));
     let watcher_state = WatcherState { 
         watcher: Mutex::new(None),
@@ -2268,7 +2274,7 @@ fn main() {
             // Character data commands
             get_character_data,
             get_character_by_skin_id,
-            update_character_data_from_rivalskins,
+            update_character_data_from_github,
             cancel_character_update,
             identify_mod_character,
             get_character_data_path,

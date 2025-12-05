@@ -93,9 +93,9 @@ libp2p = { version = "0.54", features = [
 futures = "0.3"
 async-trait = "0.1"
 
-# HTML scraping (for rivalskins.com)
-scraper = "0.21"
+# Character data management
 once_cell = "1.19"
+chrono = "0.4"
 
 [build-dependencies]
 winres = "0.1.12"

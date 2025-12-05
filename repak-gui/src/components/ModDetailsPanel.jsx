@@ -56,7 +56,9 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
       setLoading(true)
       setError(null)
       console.log('Loading details for:', mod.path)
-      const modDetails = await invoke('get_mod_details', { modPath: mod.path })
+      const modDetails = await invoke('get_mod_details', { 
+        modPath: mod.path
+      })
       console.log('Received details:', modDetails)
       setDetails(modDetails)
     } catch (err) {

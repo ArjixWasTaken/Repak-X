@@ -1,6 +1,6 @@
 // Character Data Management
 // Handles external character_data.json in roaming folder with caching for performance
-// Also includes rivalskins.com scraper functionality
+// Fetches updates from GitHub MarvelRivalsCharacterIDs repository
 
 use log::{info, warn};
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use once_cell::sync::Lazy;
 
 // === CHARACTER UPDATE CANCELLATION FLAG ===
-// Global flag to signal cancellation of the rivalskins.com fetch
+// Global flag to signal cancellation of the character data fetch
 static CANCEL_CHARACTER_UPDATE: AtomicBool = AtomicBool::new(false);
 
 /// Request cancellation of the ongoing character data update
@@ -29,6 +29,13 @@ pub fn is_update_cancelled() -> bool {
 pub fn reset_cancel_flag() {
     CANCEL_CHARACTER_UPDATE.store(false, Ordering::SeqCst);
 }
+
+// ============================================================================
+// GITHUB DATA SOURCE
+// ============================================================================
+
+const GITHUB_CHARACTER_DATA_URL: &str = 
+    "https://raw.githubusercontent.com/donutman07/MarvelRivalsCharacterIDs/main/MarvelRivalsCharacterIDs.md";
 
 // ============================================================================
 // DATA STRUCTURES
@@ -249,7 +256,7 @@ pub fn load_character_data() -> Vec<CharacterSkin> {
     Vec::new()
 }
 
-/// Save character data to external JSON file
+/// Save character data to external JSON file with backup and sorting
 pub fn save_character_data(skins: &[CharacterSkin]) -> Result<(), String> {
     let path = character_data_path();
     
@@ -259,13 +266,38 @@ pub fn save_character_data(skins: &[CharacterSkin]) -> Result<(), String> {
             .map_err(|e| format!("Failed to create directory: {}", e))?;
     }
     
-    let json = serde_json::to_string_pretty(skins)
+    // Backup existing file if it exists
+    if path.exists() {
+        let timestamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
+        let backup_path = path.with_file_name(format!("character_data_backup_{}.json", timestamp));
+        if let Err(e) = fs::copy(&path, &backup_path) {
+            warn!("Failed to create backup: {}", e);
+        } else {
+            info!("Created backup at {}", backup_path.display());
+        }
+    }
+    
+    // Sort skins before saving for consistent output
+    let mut sorted_skins = skins.to_vec();
+    sorted_skins.sort_by(|a, b| {
+        // Parse IDs as numbers for proper numeric sorting
+        let a_char_id: u32 = a.id.parse().unwrap_or(0);
+        let b_char_id: u32 = b.id.parse().unwrap_or(0);
+        let a_skin_id: u32 = a.skinid.parse().unwrap_or(0);
+        let b_skin_id: u32 = b.skinid.parse().unwrap_or(0);
+        
+        a_char_id.cmp(&b_char_id)
+            .then(a_skin_id.cmp(&b_skin_id))
+            .then(a.skin_name.cmp(&b.skin_name))
+    });
+    
+    let json = serde_json::to_string_pretty(&sorted_skins)
         .map_err(|e| format!("Failed to serialize data: {}", e))?;
     
     fs::write(&path, json)
         .map_err(|e| format!("Failed to write file: {}", e))?;
     
-    info!("Saved {} character skins to {}", skins.len(), path.display());
+    info!("Saved {} character skins to {}", sorted_skins.len(), path.display());
     Ok(())
 }
 
@@ -323,48 +355,70 @@ pub fn get_all_character_data() -> Vec<CharacterSkin> {
 }
 
 // ============================================================================
-// RIVALSKINS.COM SCRAPER
+// NAME NORMALIZATION
 // ============================================================================
 
-/// Character name mappings from URL slug to proper name
-/// These MUST match the names in get_known_character_ids() exactly
-fn get_character_name_from_slug(slug: &str) -> String {
-    match slug {
-        // Direct mappings for special cases
-        "the-punisher" => "Punisher".to_string(),
-        "the-thing" => "The Thing".to_string(),
-        "cloak-and-dagger" => "Cloak & Dagger".to_string(),
-        "jeff-the-landshark" => "Jeff the Landshark".to_string(),
-        "jeff-the-land-shark" => "Jeff the Landshark".to_string(),
-        // Hyphenated names that need exact formatting
-        "spider-man" => "Spider-Man".to_string(),
-        "star-lord" => "Star-Lord".to_string(),
-        "iron-man" => "Iron Man".to_string(),
-        "iron-fist" => "Iron Fist".to_string(),
-        "black-panther" => "Black Panther".to_string(),
-        "black-widow" => "Black Widow".to_string(),
-        "moon-knight" => "Moon Knight".to_string(),
-        "luna-snow" => "Luna Snow".to_string(),
-        "squirrel-girl" => "Squirrel Girl".to_string(),
-        "human-torch" => "Human Torch".to_string(),
-        "doctor-strange" => "Doctor Strange".to_string(),
-        "captain-america" => "Captain America".to_string(),
-        "rocket-raccoon" => "Rocket Raccoon".to_string(),
-        "mister-fantastic" => "Mister Fantastic".to_string(),
-        "winter-soldier" => "Winter Soldier".to_string(),
-        "peni-parker" => "Peni Parker".to_string(),
-        "adam-warlock" => "Adam Warlock".to_string(),
-        "invisible-woman" => "Invisible Woman".to_string(),
-        "emma-frost" => "Emma Frost".to_string(),
-        "scarlet-witch" => "Scarlet Witch".to_string(),
+/// Normalize character names for consistent capitalization
+/// Handles special cases and ensures proper formatting
+fn normalize_character_name(raw_name: &str) -> String {
+    let lower = raw_name.to_lowercase();
+    let trimmed = lower.trim();
+    
+    // Special cases that need exact formatting
+    match trimmed {
+        "the punisher" | "punisher" => "Punisher".to_string(),
+        "the thing" => "The Thing".to_string(),
+        "cloak and dagger" | "cloak & dagger" => "Cloak & Dagger".to_string(),
+        "jeff the landshark" | "jeff the land shark" => "Jeff the Landshark".to_string(),
+        "spider-man" | "spider man" | "spiderman" => "Spider-Man".to_string(),
+        "star-lord" | "star lord" | "starlord" => "Star-Lord".to_string(),
+        "iron man" | "ironman" => "Iron Man".to_string(),
+        "iron fist" | "ironfist" => "Iron Fist".to_string(),
+        "black panther" => "Black Panther".to_string(),
+        "black widow" => "Black Widow".to_string(),
+        "moon knight" => "Moon Knight".to_string(),
+        "luna snow" => "Luna Snow".to_string(),
+        "squirrel girl" => "Squirrel Girl".to_string(),
+        "human torch" => "Human Torch".to_string(),
+        "doctor strange" | "dr strange" | "dr. strange" => "Doctor Strange".to_string(),
+        "captain america" => "Captain America".to_string(),
+        "rocket raccoon" => "Rocket Raccoon".to_string(),
+        "mister fantastic" | "mr fantastic" | "mr. fantastic" => "Mister Fantastic".to_string(),
+        "winter soldier" => "Winter Soldier".to_string(),
+        "peni parker" => "Peni Parker".to_string(),
+        "adam warlock" => "Adam Warlock".to_string(),
+        "invisible woman" => "Invisible Woman".to_string(),
+        "emma frost" => "Emma Frost".to_string(),
+        "scarlet witch" => "Scarlet Witch".to_string(),
+        // Simple single-word names
+        "hulk" => "Hulk".to_string(),
+        "storm" => "Storm".to_string(),
+        "loki" => "Loki".to_string(),
+        "mantis" => "Mantis".to_string(),
+        "hawkeye" => "Hawkeye".to_string(),
+        "hela" => "Hela".to_string(),
+        "groot" => "Groot".to_string(),
+        "ultron" => "Ultron".to_string(),
+        "magik" => "Magik".to_string(),
+        "venom" => "Venom".to_string(),
+        "magneto" => "Magneto".to_string(),
+        "thor" => "Thor".to_string(),
+        "blade" => "Blade".to_string(),
+        "namor" => "Namor".to_string(),
+        "psylocke" => "Psylocke".to_string(),
+        "wolverine" => "Wolverine".to_string(),
+        "phoenix" => "Phoenix".to_string(),
+        "daredevil" => "Daredevil".to_string(),
+        "angela" => "Angela".to_string(),
+        "gambit" => "Gambit".to_string(),
         _ => {
-            // Convert slug to title case for simple names
-            slug.split('-')
+            // Fallback: title case each word
+            raw_name.split_whitespace()
                 .map(|word| {
                     let mut chars = word.chars();
                     match chars.next() {
                         None => String::new(),
-                        Some(first) => first.to_uppercase().chain(chars).collect(),
+                        Some(first) => first.to_uppercase().chain(chars.map(|c| c.to_lowercase().next().unwrap())).collect(),
                     }
                 })
                 .collect::<Vec<_>>()
@@ -373,83 +427,150 @@ fn get_character_name_from_slug(slug: &str) -> String {
     }
 }
 
-/// Parse the main page and extract links (sync helper to avoid Send issues)
-/// Returns (url, character_name, skin_name) tuples
-fn parse_costume_links(html: &str) -> Vec<(String, String, String)> {
-    use scraper::{Html, Selector};
+// ============================================================================
+// VALIDATION
+// ============================================================================
+
+/// Validate a CharacterSkin entry
+fn validate_skin(skin: &CharacterSkin) -> Result<(), String> {
+    // Check character ID is 4 digits
+    if skin.id.len() != 4 || !skin.id.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!("Invalid character ID '{}' for {}", skin.id, skin.name));
+    }
     
-    let document = Html::parse_document(html);
-    let link_selector = Selector::parse("a[href*='/item/']").unwrap();
-    let costume_regex = regex_lite::Regex::new(r"/item/\d+/(.*?)-costume-").unwrap();
+    // Check skin ID is 7 digits
+    if skin.skinid.len() != 7 || !skin.skinid.chars().all(|c| c.is_ascii_digit()) {
+        return Err(format!("Invalid skin ID '{}' for {} - {}", skin.skinid, skin.name, skin.skin_name));
+    }
     
-    let mut links: Vec<(String, String, String)> = Vec::new();
-    let mut seen_urls: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // Check skin ID starts with character ID
+    if !skin.skinid.starts_with(&skin.id) {
+        return Err(format!("Skin ID '{}' doesn't start with character ID '{}' for {} - {}", 
+            skin.skinid, skin.id, skin.name, skin.skin_name));
+    }
     
-    for element in document.select(&link_selector) {
-        if let Some(href) = element.value().attr("href") {
-            // Only process costume links
-            if let Some(caps) = costume_regex.captures(href) {
-                let char_slug = caps.get(1).map(|m| m.as_str()).unwrap_or("");
-                let char_name = get_character_name_from_slug(char_slug);
-                
-                // Get skin name from link text (like Python does), not URL
-                let skin_name_raw: String = element.text().collect();
-                
-                // Clean the skin name - remove UI elements like "+ Wishlist + Locker"
-                // Handle both with and without spaces
-                let skin_name = skin_name_raw
-                    .replace(" + Wishlist", "")
-                    .replace("+Wishlist", "")
-                    .replace(" + Locker", "")
-                    .replace("+Locker", "")
-                    .trim()
-                    .to_string();
-                
-                if !char_name.is_empty() && !skin_name.is_empty() {
-                    let full_url = if href.starts_with("http") {
-                        href.to_string()
-                    } else {
-                        format!("https://rivalskins.com{}", href)
-                    };
-                    
-                    // Avoid duplicates (same URL can appear multiple times)
-                    if !seen_urls.contains(&full_url) {
-                        seen_urls.insert(full_url.clone());
-                        links.push((full_url, char_name, skin_name));
-                    }
-                }
+    // Check names are not empty
+    if skin.name.trim().is_empty() || skin.skin_name.trim().is_empty() {
+        return Err(format!("Empty name fields for skin ID {}", skin.skinid));
+    }
+    
+    Ok(())
+}
+
+// ============================================================================
+// GITHUB DATA FETCHER
+// ============================================================================
+
+/// Parse GitHub Markdown file and extract character data
+/// Format: Markdown table with | ID | NAME | SKIN IDs | SKIN NAMES |
+/// Empty cells (| | |) mean "same as previous row"
+fn parse_github_markdown(content: &str) -> Result<Vec<CharacterSkin>, String> {
+    let mut skins = Vec::new();
+    let mut line_num = 0;
+    let mut errors = Vec::new();
+    
+    // Track current character for rows with empty ID/name cells
+    let mut current_char_id = String::new();
+    let mut current_char_name = String::new();
+    
+    for line in content.lines() {
+        line_num += 1;
+        let line = line.trim();
+        
+        // Skip empty lines, headers, and separator lines
+        if line.is_empty() || line.starts_with('#') || line.contains(":--:") {
+            continue;
+        }
+        
+        // Only process lines that look like table rows
+        if !line.starts_with('|') || !line.ends_with('|') {
+            continue;
+        }
+        
+        // Split by pipe and clean up
+        let parts: Vec<&str> = line.split('|')
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        
+        // Need exactly 4 parts: char_id, char_name, skin_id, skin_name
+        if parts.len() != 4 {
+            continue;
+        }
+        
+        let char_id_cell = parts[0].trim();
+        let char_name_cell = parts[1].trim();
+        let skin_id = parts[2].trim();
+        let skin_name = parts[3].trim();
+        
+        // If char_id cell is not empty, update current character
+        if !char_id_cell.is_empty() {
+            // Validate it's a proper 4-digit ID
+            if char_id_cell.len() == 4 && char_id_cell.chars().all(|c| c.is_ascii_digit()) {
+                current_char_id = char_id_cell.to_string();
             }
         }
+        
+        // If char_name cell is not empty, update current character name
+        if !char_name_cell.is_empty() {
+            current_char_name = char_name_cell.to_string();
+        }
+        
+        // Skip if we don't have a current character yet
+        if current_char_id.is_empty() || current_char_name.is_empty() {
+            continue;
+        }
+        
+        // Validate skin ID
+        if skin_id.len() != 7 || !skin_id.chars().all(|c| c.is_ascii_digit()) {
+            errors.push(format!("Line {}: Invalid skin ID '{}'", line_num, skin_id));
+            continue;
+        }
+        
+        // Skip if skin name is empty
+        if skin_name.is_empty() {
+            continue;
+        }
+        
+        // Normalize character name for consistent capitalization
+        let char_name = normalize_character_name(&current_char_name);
+        
+        let skin = CharacterSkin {
+            name: char_name,
+            id: current_char_id.clone(),
+            skinid: skin_id.to_string(),
+            skin_name: skin_name.to_string(),
+        };
+        
+        // Validate the skin
+        if let Err(e) = validate_skin(&skin) {
+            errors.push(format!("Line {}: {}", line_num, e));
+            continue;
+        }
+        
+        skins.push(skin);
     }
     
-    info!("Parsed {} unique costume links from page", links.len());
-    links
-}
-
-/// Parse item page to extract skin ID (sync helper to avoid Send issues)
-fn parse_skin_id_from_html(html: &str) -> Option<String> {
-    use scraper::{Html, Selector};
-    
-    let document = Html::parse_document(html);
-    let td_selector = Selector::parse("td").unwrap();
-    let skin_id_regex = regex_lite::Regex::new(r"^(ps)?(\d{7})$").unwrap();
-    
-    for td in document.select(&td_selector) {
-        let text = td.text().collect::<String>();
-        let text = text.trim();
-        
-        if let Some(caps) = skin_id_regex.captures(text) {
-            // Remove "ps" prefix if present
-            let skin_id = caps.get(2).map(|m| m.as_str()).unwrap_or(text);
-            return Some(skin_id.to_string());
+    if !errors.is_empty() {
+        warn!("Encountered {} validation errors while parsing:", errors.len());
+        for error in errors.iter().take(10) {
+            warn!("  {}", error);
+        }
+        if errors.len() > 10 {
+            warn!("  ... and {} more errors", errors.len() - 10);
         }
     }
     
-    None
+    if skins.is_empty() {
+        return Err("No valid character data found in file".to_string());
+    }
+    
+    info!("Parsed {} valid character skins from GitHub data", skins.len());
+    Ok(skins)
 }
 
-/// Fetch skin data from rivalskins.com with progress callback and cancellation support
-pub async fn fetch_rivalskins_data_with_progress<F>(on_progress: &mut F) -> Result<Vec<CharacterSkin>, String>
+/// Fetch character data from GitHub with progress callback and cancellation support
+pub async fn fetch_github_data_with_progress<F>(on_progress: &mut F) -> Result<Vec<CharacterSkin>, String>
 where
     F: FnMut(&str) + Send,
 {
@@ -457,182 +578,93 @@ where
     reset_cancel_flag();
     
     let client = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+        .user_agent("RepakGuiRevamped/1.0")
         .timeout(std::time::Duration::from_secs(30))
         .build()
         .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
     
-    on_progress("Connecting to rivalskins.com...");
-    info!("Fetching skin data from rivalskins.com...");
+    on_progress("Connecting to GitHub...");
+    info!("Fetching character data from GitHub: {}", GITHUB_CHARACTER_DATA_URL);
     
-    // Fetch the costumes page
+    // Check for cancellation
+    if is_update_cancelled() {
+        on_progress("Update cancelled by user");
+        return Err("Cancelled".to_string());
+    }
+    
+    // Fetch the markdown file
     let response = client
-        .get("https://rivalskins.com/?type=costume")
+        .get(GITHUB_CHARACTER_DATA_URL)
         .send()
         .await
-        .map_err(|e| format!("Failed to fetch rivalskins.com: {}", e))?;
+        .map_err(|e| format!("Failed to fetch GitHub data: {}", e))?;
     
     if !response.status().is_success() {
-        return Err(format!("rivalskins.com returned status: {}", response.status()));
+        return Err(format!("GitHub returned status: {}", response.status()));
     }
     
-    let html = response.text().await
+    on_progress("Downloading character data...");
+    
+    let content = response.text().await
         .map_err(|e| format!("Failed to read response: {}", e))?;
     
-    // Parse links synchronously to avoid Send issues with scraper
-    let links_to_fetch = parse_costume_links(&html);
-    let total = links_to_fetch.len();
-    
-    on_progress(&format!("Found {} skins to process...", total));
-    info!("Found {} costume links to process", total);
-    
-    let mut skins: Vec<CharacterSkin> = Vec::new();
-    let known_ids = get_known_character_ids();
-    
-    let mut added_count = 0;
-    let mut skipped_count = 0;
-    
-    // Fetch each item page to get skin ID
-    for (i, (url, char_name, skin_name)) in links_to_fetch.into_iter().enumerate() {
-        // Check for cancellation
-        if is_update_cancelled() {
-            on_progress("Update cancelled by user");
-            return Err("Cancelled".to_string());
-        }
-        
-        // Progress update every 10 items
-        if i % 10 == 0 || i < 5 {
-            on_progress(&format!("Processing {}/{}: {} - {} (added: {}, skipped: {})", 
-                i + 1, total, char_name, skin_name, added_count, skipped_count));
-        }
-        
-        // Add delay to be respectful
-        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        
-        match client.get(&url).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                if let Ok(item_html) = resp.text().await {
-                    // Parse synchronously to avoid Send issues
-                    let found_skin_id = parse_skin_id_from_html(&item_html);
-                    
-                    // If no skin ID found, check if it's a default skin
-                    let skin_id = if let Some(id) = found_skin_id {
-                        info!("Found skin ID {} for {} - {}", id, char_name, skin_name);
-                        id
-                    } else {
-                        let skin_lower = skin_name.to_lowercase();
-                        let is_default = skin_lower.contains("default");
-                        
-                        if is_default {
-                            // Default skins use pattern: character_id + "001"
-                            if let Some(char_id) = known_ids.get(&char_name) {
-                                let default_id = format!("{}001", char_id);
-                                info!("Generated default skin ID {} for {} - {}", default_id, char_name, skin_name);
-                                default_id
-                            } else {
-                                warn!("No character ID mapping for: '{}' - cannot generate default skin ID", char_name);
-                                skipped_count += 1;
-                                continue;
-                            }
-                        } else {
-                            warn!("No skin ID found in HTML for: {} - {} (URL: {})", char_name, skin_name, url);
-                            skipped_count += 1;
-                            continue;
-                        }
-                    };
-                    
-                    // Extract character ID from skin ID (first 4 digits)
-                    let char_id = if skin_id.len() >= 4 {
-                        skin_id[..4].to_string()
-                    } else if let Some(id) = known_ids.get(&char_name) {
-                        id.clone()
-                    } else {
-                        warn!("Could not determine character ID for skin: {}", skin_id);
-                        skipped_count += 1;
-                        continue;
-                    };
-                    
-                    skins.push(CharacterSkin {
-                        name: char_name.clone(),
-                        id: char_id.clone(),
-                        skinid: skin_id.clone(),
-                        skin_name: skin_name.clone(),
-                    });
-                    added_count += 1;
-                }
-            }
-            Ok(resp) => {
-                warn!("Failed to fetch {}: status {}", url, resp.status());
-                skipped_count += 1;
-            }
-            Err(e) => {
-                warn!("Error fetching {}: {}", url, e);
-                skipped_count += 1;
-            }
-        }
+    // Check for cancellation before parsing
+    if is_update_cancelled() {
+        on_progress("Update cancelled by user");
+        return Err("Cancelled".to_string());
     }
     
-    on_progress(&format!("Fetch complete: {} skins found, {} skipped", added_count, skipped_count));
-    info!("Fetched {} skins from rivalskins.com ({} skipped)", skins.len(), skipped_count);
+    on_progress("Parsing character data...");
+    
+    let skins = parse_github_markdown(&content)?;
+    
+    on_progress(&format!("Successfully fetched {} character skins", skins.len()));
+    info!("Successfully fetched {} character skins from GitHub", skins.len());
+    
     Ok(skins)
 }
 
-/// Merge new skins with existing data (preserves existing, adds new)
-/// Sorts by character ID (numeric), then skin ID (numeric) to maintain consistent ordering
-pub fn merge_character_data(existing: &[CharacterSkin], new_skins: &[CharacterSkin]) -> Vec<CharacterSkin> {
-    let mut merged: HashMap<String, CharacterSkin> = HashMap::new();
-    
-    // Add existing first
-    for skin in existing {
-        merged.insert(skin.skinid.clone(), skin.clone());
-    }
-    
-    // Add/update with new skins
-    for skin in new_skins {
-        merged.insert(skin.skinid.clone(), skin.clone());
-    }
-    
-    let mut result: Vec<_> = merged.into_values().collect();
-    
-    // Sort by character ID (numeric), then skin ID (numeric) for consistent ordering
-    // This matches the original file's organization
-    result.sort_by(|a, b| {
-        // Parse IDs as numbers for proper numeric sorting
-        let a_char_id: u32 = a.id.parse().unwrap_or(0);
-        let b_char_id: u32 = b.id.parse().unwrap_or(0);
-        let a_skin_id: u32 = a.skinid.parse().unwrap_or(0);
-        let b_skin_id: u32 = b.skinid.parse().unwrap_or(0);
-        
-        a_char_id.cmp(&b_char_id).then(a_skin_id.cmp(&b_skin_id))
-    });
-    
-    result
-}
-
-/// Update character data from rivalskins.com with progress callback
-/// (fetches, merges, saves, refreshes cache)
-pub async fn update_from_rivalskins_with_progress<F>(mut on_progress: F) -> Result<usize, String>
+/// Update character data from GitHub with progress callback
+/// (fetches, validates, saves, refreshes cache)
+pub async fn update_from_github_with_progress<F>(mut on_progress: F) -> Result<usize, String>
 where
     F: FnMut(&str) + Send,
 {
     let existing = load_character_data();
-    info!("Loaded {} existing skins from cache", existing.len());
+    let existing_count = existing.len();
+    info!("Loaded {} existing skins from cache", existing_count);
     
-    let new_skins = fetch_rivalskins_data_with_progress(&mut on_progress).await?;
-    info!("Fetched {} skins from rivalskins.com", new_skins.len());
+    let new_skins = fetch_github_data_with_progress(&mut on_progress).await?;
+    info!("Fetched {} skins from GitHub", new_skins.len());
     
-    on_progress(&format!("Merging {} fetched skins with {} existing...", new_skins.len(), existing.len()));
+    on_progress(&format!("Validating {} fetched skins...", new_skins.len()));
     
-    let merged = merge_character_data(&existing, &new_skins);
-    let new_count = if merged.len() > existing.len() { merged.len() - existing.len() } else { 0 };
+    // Validate all skins
+    let mut validation_errors = 0;
+    for skin in &new_skins {
+        if let Err(e) = validate_skin(skin) {
+            warn!("Validation error: {}", e);
+            validation_errors += 1;
+        }
+    }
     
-    on_progress(&format!("Saving {} total skins to disk...", merged.len()));
-    save_character_data(&merged)?;
+    if validation_errors > 0 {
+        warn!("Found {} validation errors in fetched data", validation_errors);
+    }
+    
+    on_progress(&format!("Saving {} character skins to disk...", new_skins.len()));
+    save_character_data(&new_skins)?;
     
     on_progress("Refreshing cache...");
     refresh_cache();
     
-    info!("Update complete: {} total skins, {} new", merged.len(), new_count);
+    let new_count = if new_skins.len() > existing_count { 
+        new_skins.len() - existing_count 
+    } else { 
+        0 
+    };
+    
+    info!("Update complete: {} total skins, {} new", new_skins.len(), new_count);
     Ok(new_count)
 }
 
