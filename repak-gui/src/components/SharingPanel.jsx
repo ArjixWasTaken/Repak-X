@@ -14,10 +14,12 @@ import {
   Security as SecurityIcon,
   Info as InfoIcon,
   Error as ErrorIcon,
-  Cancel as CancelIcon
+  Cancel as CancelIcon,
+  Search as SearchIcon
 } from '@mui/icons-material';
+import './SharingPanel.css';
 
-const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePath }) => {
+export default function SharingPanel({ onClose, gamePath, installedMods, selectedMods }) {
   const [activeTab, setActiveTab] = useState('share'); // 'share' or 'receive'
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
@@ -31,6 +33,7 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
   const [selectedModPaths, setSelectedModPaths] = useState(new Set());
   const [packPreview, setPackPreview] = useState(null);
   const [calculatingPreview, setCalculatingPreview] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
 
   // Receive State
   const [connectionString, setConnectionString] = useState('');
@@ -42,22 +45,20 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
 
   // Initialize selected mods from props
   useEffect(() => {
-    if (isOpen && selectedMods && selectedMods.size > 0) {
+    if (selectedMods && selectedMods.size > 0) {
       setSelectedModPaths(new Set(selectedMods));
       setPackName(`My Mod Pack (${selectedMods.size} mods)`);
       setPackPreview(null); // Reset preview
     }
-  }, [isOpen, selectedMods]);
+  }, [selectedMods]);
 
   // Poll for status
   useEffect(() => {
     let interval;
-    if (isOpen) {
-      checkStatus();
-      interval = setInterval(checkStatus, 1000);
-    }
+    checkStatus();
+    interval = setInterval(checkStatus, 1000);
     return () => clearInterval(interval);
-  }, [isOpen]);
+  }, []);
 
   // Validation helper
   const validateConnectionString = (str) => {
@@ -256,8 +257,6 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
     setPackPreview(null); // Invalidate preview
   };
 
-  if (!isOpen) return null;
-
   return (
     <div className="p2p-overlay">
       <motion.div 
@@ -269,7 +268,7 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
         <div className="p2p-header">
           <div className="p2p-title">
             <WifiIcon className="p2p-icon" />
-            <h2>P2P Mod Sharing</h2>
+            <h2>Mod Sharing</h2>
           </div>
           <button onClick={onClose} className="btn-icon-close">
             <CloseIcon />
@@ -308,80 +307,104 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
             <div className="share-view">
               {!isSharing ? (
                 <>
-                  <div className="form-group">
-                    <label>Pack Name</label>
-                    <input 
-                      type="text" 
-                      value={packName} 
-                      onChange={(e) => setPackName(e.target.value)}
-                      placeholder="e.g. My Awesome Skin Pack"
-                      className="p2p-input"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Description (Optional)</label>
-                    <textarea 
-                      value={packDesc} 
-                      onChange={(e) => setPackDesc(e.target.value)}
-                      placeholder="Describe what's in this pack..."
-                      className="p2p-textarea"
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label>Creator Name (Optional)</label>
-                    <input 
-                      type="text" 
-                      value={creatorName} 
-                      onChange={(e) => setCreatorName(e.target.value)}
-                      placeholder="Your Name"
-                      className="p2p-input"
-                    />
-                  </div>
-                  
-                  <div className="mod-selection-list">
-                    <label>Select Mods to Share ({selectedModPaths.size})</label>
-                    <div className="mod-list-scroll">
-                      {installedMods.map(mod => (
-                        <div 
-                          key={mod.path} 
-                          className={`mod-select-item ${selectedModPaths.has(mod.path) ? 'selected' : ''}`}
-                          onClick={() => toggleModSelection(mod.path)}
-                        >
-                          <input 
-                            type="checkbox" 
-                            checked={selectedModPaths.has(mod.path)}
-                            readOnly
-                          />
-                          <span className="mod-name">
-                            {mod.custom_name || mod.path.split('\\').pop()}
-                          </span>
+                  <div className="share-layout-grid">
+                    <div className="share-left-col">
+                      <div className="form-group">
+                        <label>Pack Name</label>
+                        <input 
+                          type="text" 
+                          value={packName} 
+                          onChange={(e) => setPackName(e.target.value)}
+                          placeholder="e.g. My Awesome Skin Pack"
+                          className="p2p-input"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Description (Optional)</label>
+                        <textarea 
+                          value={packDesc} 
+                          onChange={(e) => setPackDesc(e.target.value)}
+                          placeholder="Describe what's in this pack..."
+                          className="p2p-textarea"
+                        />
+                      </div>
+                      <div className="form-group">
+                        <label>Creator Name (Optional)</label>
+                        <input 
+                          type="text" 
+                          value={creatorName} 
+                          onChange={(e) => setCreatorName(e.target.value)}
+                          placeholder="Your Name"
+                          className="p2p-input"
+                        />
+                      </div>
+
+                      {selectedModPaths.size > 0 && (
+                        <div className="pack-preview-section">
+                            {!packPreview ? (
+                                <button 
+                                    onClick={handleCalculatePreview} 
+                                    className="btn-secondary btn-small"
+                                    disabled={calculatingPreview}
+                                >
+                                    {calculatingPreview ? "Calculating..." : "Calculate Pack Size"}
+                                </button>
+                            ) : (
+                                <div className="preview-info">
+                                    <span>Total Size: {(packPreview.total_size / 1024 / 1024).toFixed(2)} MB</span>
+                                    <span>Files: {packPreview.file_count}</span>
+                                </div>
+                            )}
                         </div>
-                      ))}
+                      )}
+
+                      <button onClick={handleStartSharing} className="btn-primary btn-large">
+                        <ShareIcon /> Start Sharing
+                      </button>
+                    </div>
+
+                    <div className="share-right-col">
+                      <div className="mod-selection-list">
+                        <div className="mod-list-header">
+                            <label>Select Mods to Share ({selectedModPaths.size})</label>
+                            <div className="search-box">
+                                <SearchIcon fontSize="small" className="search-icon"/>
+                                <input 
+                                    type="text" 
+                                    value={searchTerm}
+                                    onChange={(e) => setSearchTerm(e.target.value)}
+                                    placeholder="Search mods..."
+                                />
+                            </div>
+                        </div>
+                        <div className="mod-list-scroll">
+                          {installedMods.filter(mod => {
+                              const filename = mod.path.split('\\').pop();
+                              const name = mod.custom_name || filename.replace(/_9999999_P/g, '').replace(/\.pak$/i, '');
+                              return name.toLowerCase().includes(searchTerm.toLowerCase());
+                          }).map(mod => {
+                            const filename = mod.path.split('\\').pop();
+                            const displayName = mod.custom_name || filename.replace(/_9999999_P/g, '').replace(/\.pak$/i, '');
+                            return (
+                            <div 
+                              key={mod.path} 
+                              className={`mod-select-item ${selectedModPaths.has(mod.path) ? 'selected' : ''}`}
+                              onClick={() => toggleModSelection(mod.path)}
+                            >
+                              <input 
+                                type="checkbox" 
+                                checked={selectedModPaths.has(mod.path)}
+                                readOnly
+                              />
+                              <span className="mod-name">
+                                {displayName}
+                              </span>
+                            </div>
+                          )})}
+                        </div>
+                      </div>
                     </div>
                   </div>
-
-                  {selectedModPaths.size > 0 && (
-                    <div className="pack-preview-section">
-                        {!packPreview ? (
-                            <button 
-                                onClick={handleCalculatePreview} 
-                                className="btn-secondary btn-small"
-                                disabled={calculatingPreview}
-                            >
-                                {calculatingPreview ? "Calculating..." : "Calculate Pack Size"}
-                            </button>
-                        ) : (
-                            <div className="preview-info">
-                                <span>Total Size: {(packPreview.total_size / 1024 / 1024).toFixed(2)} MB</span>
-                                <span>Files: {packPreview.file_count}</span>
-                            </div>
-                        )}
-                    </div>
-                  )}
-
-                  <button onClick={handleStartSharing} className="btn-primary btn-large" style={{marginTop: '1rem'}}>
-                    <ShareIcon /> Start Sharing
-                  </button>
                 </>
               ) : (
                 <div className="active-share-view">
@@ -528,395 +551,8 @@ const P2PSharingPanel = ({ isOpen, onClose, installedMods, selectedMods, gamePat
           )}
         </div>
       </motion.div>
-
-      <style>{`
-        .p2p-overlay {
-          position: fixed;
-          top: 0;
-          left: 0;
-          right: 0;
-          bottom: 0;
-          background: rgba(0, 0, 0, 0.7);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          z-index: 1000;
-          backdrop-filter: blur(4px);
-        }
-        .p2p-modal {
-          background: #1e1e1e;
-          width: 600px;
-          max-width: 90vw;
-          max-height: 85vh;
-          border-radius: 12px;
-          box-shadow: 0 20px 50px rgba(0,0,0,0.5);
-          display: flex;
-          flex-direction: column;
-          overflow: hidden;
-          border: 1px solid #333;
-        }
-        .p2p-header {
-          padding: 1.5rem;
-          border-bottom: 1px solid #333;
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          background: #252525;
-        }
-        .p2p-title {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-        }
-        .p2p-title h2 {
-          margin: 0;
-          font-size: 1.25rem;
-          color: #fff;
-        }
-        .p2p-icon {
-          color: #4a9eff;
-        }
-        .btn-icon-close {
-          background: none;
-          border: none;
-          color: #888;
-          cursor: pointer;
-          padding: 4px;
-          border-radius: 4px;
-        }
-        .btn-icon-close:hover {
-          background: rgba(255,255,255,0.1);
-          color: #fff;
-        }
-        .p2p-tabs {
-          display: flex;
-          border-bottom: 1px solid #333;
-        }
-        .p2p-tab {
-          flex: 1;
-          padding: 1rem;
-          background: none;
-          border: none;
-          color: #888;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-          font-weight: 600;
-          transition: all 0.2s;
-          border-bottom: 2px solid transparent;
-        }
-        .p2p-tab:hover {
-          background: rgba(255,255,255,0.05);
-          color: #ccc;
-        }
-        .p2p-tab.active {
-          color: #4a9eff;
-          border-bottom-color: #4a9eff;
-          background: rgba(74, 158, 255, 0.05);
-        }
-        .p2p-content {
-          padding: 1.5rem;
-          overflow-y: auto;
-          flex: 1;
-        }
-        .form-group {
-          margin-bottom: 1.25rem;
-        }
-        .form-group label {
-          display: block;
-          margin-bottom: 0.5rem;
-          color: #ccc;
-          font-size: 0.9rem;
-        }
-        .p2p-input, .p2p-textarea {
-          width: 100%;
-          padding: 0.75rem;
-          background: #111;
-          border: 1px solid #333;
-          border-radius: 6px;
-          color: #fff;
-          font-family: inherit;
-        }
-        .p2p-input:focus, .p2p-textarea:focus {
-          border-color: #4a9eff;
-          outline: none;
-        }
-        .p2p-textarea {
-          min-height: 80px;
-          resize: vertical;
-        }
-        .mod-selection-list {
-          margin-bottom: 1.5rem;
-          border: 1px solid #333;
-          border-radius: 6px;
-          overflow: hidden;
-        }
-        .mod-selection-list label {
-          display: block;
-          padding: 0.75rem;
-          background: #252525;
-          border-bottom: 1px solid #333;
-          margin: 0;
-          font-weight: 600;
-        }
-        .mod-list-scroll {
-          max-height: 200px;
-          overflow-y: auto;
-          background: #111;
-        }
-        .mod-select-item {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          padding: 0.5rem 0.75rem;
-          border-bottom: 1px solid #222;
-          cursor: pointer;
-        }
-        .mod-select-item:hover {
-          background: rgba(255,255,255,0.05);
-        }
-        .mod-select-item.selected {
-          background: rgba(74, 158, 255, 0.1);
-        }
-        .btn-primary, .btn-danger, .btn-secondary {
-          width: 100%;
-          padding: 0.75rem;
-          border: none;
-          border-radius: 6px;
-          font-weight: 600;
-          cursor: pointer;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-          transition: all 0.2s;
-        }
-        .btn-primary {
-          background: #4a9eff;
-          color: #fff;
-        }
-        .btn-primary:hover {
-          background: #3a8eef;
-        }
-        .btn-danger {
-          background: #ff4a4a;
-          color: #fff;
-        }
-        .btn-danger:hover {
-          background: #ee3a3a;
-        }
-        .btn-secondary {
-          background: #444;
-          color: #fff;
-        }
-        .btn-secondary:hover {
-          background: #555;
-        }
-        .p2p-error {
-          background: rgba(255, 74, 74, 0.1);
-          border: 1px solid rgba(255, 74, 74, 0.3);
-          color: #ff6b6b;
-          padding: 0.75rem;
-          border-radius: 6px;
-          margin-bottom: 1rem;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-        .p2p-status {
-          background: rgba(74, 158, 255, 0.1);
-          border: 1px solid rgba(74, 158, 255, 0.3);
-          color: #4a9eff;
-          padding: 0.75rem;
-          border-radius: 6px;
-          margin-bottom: 1rem;
-          display: flex;
-          align-items: center;
-          gap: 0.5rem;
-        }
-        .active-share-view {
-          text-align: center;
-        }
-        .success-banner {
-          background: rgba(46, 204, 113, 0.1);
-          color: #2ecc71;
-          padding: 1rem;
-          border-radius: 6px;
-          margin-bottom: 1.5rem;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 0.5rem;
-          font-weight: bold;
-          font-size: 1.1rem;
-        }
-        .share-code-display {
-          margin-bottom: 2rem;
-        }
-        .code-box {
-          background: #000;
-          border: 1px solid #444;
-          padding: 1rem;
-          border-radius: 6px;
-          font-family: monospace;
-          font-size: 1.1rem;
-          color: #4a9eff;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-top: 0.5rem;
-          word-break: break-all;
-        }
-        .btn-copy {
-          background: none;
-          border: none;
-          color: #888;
-          cursor: pointer;
-          padding: 4px;
-        }
-        .btn-copy:hover {
-          color: #fff;
-        }
-        .hint {
-          font-size: 0.85rem;
-          color: #888;
-          margin-top: 0.5rem;
-        }
-        .session-info {
-          background: #252525;
-          padding: 1rem;
-          border-radius: 6px;
-          margin-bottom: 1.5rem;
-          text-align: left;
-        }
-        .info-row {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 0.5rem;
-          font-size: 0.9rem;
-        }
-        .info-row:last-child {
-          margin-bottom: 0;
-        }
-        .secure-badge {
-          color: #2ecc71;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          font-size: 0.8rem;
-        }
-        .code-input {
-          font-family: monospace;
-          font-size: 1.1rem;
-          text-align: center;
-          letter-spacing: 1px;
-        }
-        .security-note {
-          display: flex;
-          align-items: center;
-          gap: 0.75rem;
-          background: rgba(255, 193, 7, 0.1);
-          padding: 0.75rem;
-          border-radius: 6px;
-          margin-bottom: 1.5rem;
-          color: #ffc107;
-          font-size: 0.9rem;
-        }
-        .btn-small {
-            padding: 0.5rem;
-            font-size: 0.9rem;
-        }
-        .code-input.valid {
-            border-color: #2ecc71;
-            background: rgba(46, 204, 113, 0.05);
-        }
-        .code-input.invalid {
-            border-color: #ff4a4a;
-            background: rgba(255, 74, 74, 0.05);
-        }
-        .input-with-validation {
-            position: relative;
-            display: flex;
-            align-items: center;
-        }
-        .validation-icon {
-            position: absolute;
-            right: 10px;
-            font-size: 1.2rem;
-        }
-        .validation-icon.valid {
-            color: #2ecc71;
-        }
-        .validation-icon.invalid {
-            color: #ff4a4a;
-        }
-        .pack-preview-section {
-            margin-bottom: 1rem;
-            padding: 0.75rem;
-            background: #252525;
-            border-radius: 6px;
-            display: flex;
-            justify-content: center;
-        }
-        .preview-info {
-            display: flex;
-            gap: 1.5rem;
-            font-weight: 600;
-            color: #ccc;
-        }
-        .progress-container {
-          background: #252525;
-          padding: 1rem;
-          border-radius: 6px;
-          margin-bottom: 1.5rem;
-        }
-        .progress-info {
-          display: flex;
-          justify-content: space-between;
-          margin-bottom: 0.5rem;
-          font-size: 0.9rem;
-        }
-        .progress-bar-track {
-          height: 8px;
-          background: #111;
-          border-radius: 4px;
-          overflow: hidden;
-          margin-bottom: 0.5rem;
-        }
-        .progress-bar-fill {
-          height: 100%;
-          background: #4a9eff;
-          transition: width 0.3s ease;
-        }
-        .progress-stats {
-          display: flex;
-          justify-content: space-between;
-          font-size: 0.8rem;
-          color: #888;
-        }
-        .status-badge {
-          display: inline-block;
-          margin-top: 0.5rem;
-          padding: 2px 8px;
-          background: #333;
-          border-radius: 4px;
-          font-size: 0.75rem;
-          color: #ccc;
-        }
-        .completion-state {
-          text-align: center;
-          padding: 2rem 0;
-        }
-        .success-icon-large {
-          font-size: 4rem !important;
-          color: #2ecc71;
-          margin-bottom: 1rem;
-        }
-      `}</style>
     </div>
   );
 };
 
-export default P2PSharingPanel;
+
