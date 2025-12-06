@@ -4,14 +4,39 @@ Repak GUI is a Windows application for installing and repacking Marvel Rivals mo
 
 ## 🚀 Quick Start
 
-**To build and run:**
+### For Contributors (Building from Source)
+
+**One-command build:**
 ```powershell
-.\build_app.ps1  # First time or after changes
+.\build_contributor.ps1  # Builds everything: C# tools, frontend, backend
+```
+
+Or double-click `build_contributor.bat` on Windows.
+
+This builds:
+- ✅ UAssetBridge.exe (C# texture processing)
+- ✅ StaticMeshSerializeSizeFixer.exe (C# mesh fixing)
+- ✅ React frontend
+- ✅ Rust backend + Tauri app
+
+**See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed build instructions and prerequisites.**
+
+### For Creating Distribution Packages
+
+```powershell
+.\build_and_package.ps1 -Zip  # Builds everything and creates a shareable ZIP
+```
+
+This creates a complete distribution package in `dist/` ready to share with users.
+
+### For Development (Quick Iteration)
+
+```powershell
+.\build_app.ps1  # Frontend + Backend only (assumes C# tools already built)
 .\run_app.ps1    # Launch the app
 ```
 
-**⚠️ Important:** Don't use `cargo build` directly! This is a Tauri + React app.  
-See [README_QUICK_START.md](README_QUICK_START.md) or [BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md) for details.
+**⚠️ Important:** Don't use `cargo build` directly! This is a Tauri + React app with C# dependencies.
 
 ---
 
