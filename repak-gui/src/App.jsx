@@ -349,6 +349,13 @@ function App() {
     try {
       await invoke('set_mod_priority', { modPath, priority })
       setStatus(`Priority set to ${priority}`)
+      
+      // If the modified mod is currently selected, clear selection to force refresh of details
+      // This ensures the details panel updates with the new filename (since priority changes filename)
+      if (selectedMod && selectedMod.path === modPath) {
+        setSelectedMod(null)
+      }
+      
       await loadMods()
     } catch (error) {
       setStatus('Error setting priority: ' + error)
