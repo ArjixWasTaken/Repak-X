@@ -169,8 +169,6 @@ Each mod has a `folder_id` field:
 | Root folder | 0 | 📁 or custom | Bold, accent color |
 | Subfolder | 16px | 📁 | Normal weight |
 
----
-
 ## Interaction Patterns
 
 ### Expanding/Collapsing

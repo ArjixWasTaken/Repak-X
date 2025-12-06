@@ -1,7 +1,7 @@
 pub mod install_mod_logic;
 
 use crate::install_mod::install_mod_logic::archives::{extract_zip, extract_rar, extract_7z};
-use crate::uasset_detection::{detect_mesh_files, detect_texture_files};
+use crate::uasset_detection::{detect_mesh_files, detect_texture_files, detect_static_mesh_files};
 use crate::utils::{collect_files, get_current_pak_characteristics};
 use crate::utoc_utils::read_utoc;
 use log::{debug, error};
@@ -154,6 +154,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     // Auto-detect mesh and texture files
                     let auto_fix_mesh = detect_mesh_files(&files);
                     let auto_fix_textures = detect_texture_files(&files);
+                    let auto_fix_static_mesh = detect_static_mesh_files(&files);
 
                     let installable_mod = InstallableMod {
                         mod_name: mod_base_name,
@@ -161,6 +162,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         repak: !is_audio_or_movie,  // Only use repak if NOT Audio/Movies
                         fix_mesh: auto_fix_mesh,
                         fix_textures: auto_fix_textures,
+                        fix_serialsize_header: auto_fix_static_mesh,
                         is_dir: false,
                         reader: Some(builder),
                         mod_path: file_path.to_path_buf(),
@@ -230,6 +232,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         // Auto-detect mesh and texture files
                         let auto_fix_mesh = detect_mesh_files(&file_strings);
                         let auto_fix_textures = detect_texture_files(&file_strings);
+                        let auto_fix_static_mesh = detect_static_mesh_files(&file_strings);
                         
                         let installable_mod = InstallableMod {
                             mod_name,
@@ -237,6 +240,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                             repak: !is_audio_or_movies,  // Will go through convert_to_iostore_directory
                             fix_mesh: auto_fix_mesh,
                             fix_textures: auto_fix_textures,
+                            fix_serialsize_header: auto_fix_static_mesh,
                             is_dir: true,  // Mark as directory so it uses convert_to_iostore_directory
                             reader: None,
                             mod_path: entry_path,
@@ -285,6 +289,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     let is_audio_or_movies = modtype.contains("Audio") || modtype.contains("Movies");
                     let auto_fix_mesh = detect_mesh_files(&file_strings);
                     let auto_fix_textures = detect_texture_files(&file_strings);
+                    let auto_fix_static_mesh = detect_static_mesh_files(&file_strings);
                     
                     let installable_mod = InstallableMod {
                         mod_name,
@@ -292,6 +297,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         repak: !is_audio_or_movies,
                         fix_mesh: auto_fix_mesh,
                         fix_textures: auto_fix_textures,
+                        fix_serialsize_header: auto_fix_static_mesh,
                         is_dir: true,
                         reader: None,
                         mod_path: archive_root.to_path_buf(),
@@ -337,6 +343,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             let mut len = 1;
             let mut auto_fix_mesh = false;
             let mut auto_fix_textures = false;
+            let mut auto_fix_static_mesh = false;
 
             if !is_dir && !is_archive {
                 let builder = repak::PakBuilder::new()
@@ -365,6 +372,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                             // Auto-detect mesh and texture files in pak files
                             auto_fix_mesh = detect_mesh_files(&files);
                             auto_fix_textures = detect_texture_files(&files);
+                            auto_fix_static_mesh = detect_static_mesh_files(&files);
                         }
                     }
                     Err(e) => {
@@ -387,6 +395,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 // Auto-detect mesh and texture files
                 auto_fix_mesh = detect_mesh_files(&files);
                 auto_fix_textures = detect_texture_files(&files);
+                auto_fix_static_mesh = detect_static_mesh_files(&files);
             }
 
             if is_archive {
@@ -423,6 +432,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 repak: should_repak,
                 fix_mesh: auto_fix_mesh,
                 fix_textures: auto_fix_textures,
+                fix_serialsize_header: auto_fix_static_mesh,
                 is_dir,
                 reader: pak,
                 mod_path: path.clone(),

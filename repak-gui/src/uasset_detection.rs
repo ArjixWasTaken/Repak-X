@@ -221,3 +221,27 @@ pub fn detect_texture_files(mod_contents: &[String]) -> bool {
     false
 }
 
+/// Detects Static Mesh files using UAssetAPI
+/// Sync version for use in install_mod.rs
+pub fn detect_static_mesh_files(mod_contents: &[String]) -> bool {
+    let uasset_files: Vec<&String> = mod_contents.iter()
+        .filter(|f| f.to_lowercase().ends_with(".uasset"))
+        .collect();
+    
+    if uasset_files.is_empty() {
+        return false;
+    }
+    
+    // Use UAssetAPI for detection
+    if let Ok(toolkit) = UAssetToolkitSync::new(None) {
+        for file in uasset_files {
+            if let Ok(true) = toolkit.is_static_mesh_uasset(file) {
+                return true;
+            }
+        }
+    }
+
+    // UAssetAPI unavailable or no matches found
+    false
+}
+
