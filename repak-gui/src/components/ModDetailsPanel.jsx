@@ -12,6 +12,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
 
   useEffect(() => {
     if (mod) {
+      setError(null) // Reset error state when mod changes
       if (initialDetails && initialDetails.mod_path === mod.path) {
         setDetails(initialDetails)
         setLoading(false)

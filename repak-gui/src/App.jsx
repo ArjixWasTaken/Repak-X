@@ -682,6 +682,12 @@ function App() {
     try {
       await invoke('delete_mod', { path: modPath })
       setStatus('Mod deleted')
+
+      // Clear selection if the deleted mod was selected
+      if (selectedMod && selectedMod.path === modPath) {
+        setSelectedMod(null)
+      }
+
       await loadMods()
     } catch (error) {
       setStatus('Error deleting mod: ' + error)
@@ -757,9 +763,14 @@ function App() {
       return
     }
 
+    // Check if folderId corresponds to the root folder (depth 0)
+    // If so, pass null to backend to move to root
+    const targetFolder = folders.find(f => f.id === folderId)
+    const effectiveFolderId = (targetFolder && targetFolder.depth === 0) ? null : folderId
+
     try {
       for (const modPath of selectedMods) {
-        await invoke('assign_mod_to_folder', { modPath, folderId })
+        await invoke('assign_mod_to_folder', { modPath, folderId: effectiveFolderId })
       }
       setStatus(`Moved ${selectedMods.size} mod(s) to folder!`)
       setSelectedMods(new Set())
@@ -775,8 +786,13 @@ function App() {
       setStatus('Cannot move mods while game is running')
       return
     }
+
+    // Check if folderId corresponds to the root folder (depth 0)
+    const targetFolder = folders.find(f => f.id === folderId)
+    const effectiveFolderId = (targetFolder && targetFolder.depth === 0) ? null : folderId
+
     try {
-      await invoke('assign_mod_to_folder', { modPath, folderId })
+      await invoke('assign_mod_to_folder', { modPath, folderId: effectiveFolderId })
       setStatus('Mod moved to folder')
       await loadMods()
       await loadFolders()
@@ -858,8 +874,12 @@ function App() {
     
     if (modPath) {
       try {
-        console.log('Calling assign_mod_to_folder with:', { modPath, folderId })
-        await invoke('assign_mod_to_folder', { modPath, folderId })
+        // Check if folderId corresponds to the root folder (depth 0)
+        const targetFolder = folders.find(f => f.id === folderId)
+        const effectiveFolderId = (targetFolder && targetFolder.depth === 0) ? null : folderId
+
+        console.log('Calling assign_mod_to_folder with:', { modPath, folderId: effectiveFolderId })
+        await invoke('assign_mod_to_folder', { modPath, folderId: effectiveFolderId })
         setStatus(`Mod moved to ${folderId}!`)
         await loadMods()
         await loadFolders()

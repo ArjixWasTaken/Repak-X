@@ -18,6 +18,10 @@
 ### Components
 - **Tooltip**: Implemented a custom `Tooltip` component (HeroUI style) to replace default browser tooltips.
 
+### Bug Fixes
+- **Mod Details Panel**: Fixed a crash/stale error state when deleting or moving the currently selected mod.
+- **Root Folder Move**: Fixed an issue where moving mods to the root folder (e.g., `~mods`) would fail with "Folder does not exist" due to incorrect path resolution in the backend call.
+
 ### Documentation
 - **Proposals**: Added `LAUNCH_GAME_PROPOSAL.md` detailing the backend requirements for the game launcher feature.
 
