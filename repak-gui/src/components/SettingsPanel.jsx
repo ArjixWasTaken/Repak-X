@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import { AnimatedThemeToggler } from './ui/AnimatedThemeToggler'
 import './SettingsPanel.css'
 
 const ACCENT_COLORS = {
@@ -170,14 +171,12 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
 
           <div className="setting-section">
             <h3>Theme</h3>
-            <select 
-              value={theme} 
-              onChange={(e) => setTheme(e.target.value)}
-              className="theme-select"
-            >
-              <option value="dark">Dark Theme</option>
-              <option value="light">Light Theme</option>
-            </select>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <AnimatedThemeToggler theme={theme} setTheme={setTheme} />
+              <span style={{ fontSize: '0.9rem', opacity: 0.8 }}>
+                {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
+              </span>
+            </div>
           </div>
 
           <div className="setting-section">

@@ -1,5 +1,26 @@
 # Changelog - UI & Functionality Overhaul
 
+## Update - Recursive Folders & Header Polish (Dec 6, 2025)
+
+### Header & Navigation
+- **Layout**: Rearranged header elements for better visual flow.
+  - Moved "Game Running" indicator before the "Share" button.
+  - Moved "Check Conflicts" button to the main action bar (before view switcher).
+  - Replaced the "Settings" emoji button with a standard Gear Icon.
+- **Mod Count**: Moved the total mod count to the header title (greyed out) for a cleaner look.
+- **Launch Game**: Added a "Play" button to the header (currently a placeholder linking to the proposal).
+
+### Sidebar & Navigation
+- **Recursive Folder Tree**: Replaced the flat folder list with a new `FolderTree` component.
+- **Virtual Nesting**: Implemented client-side parsing of folder names (e.g., "Category/Subcategory") to display a nested hierarchy without backend changes.
+- **Resizing**: Updated the resize logic for the right panel (Min: 25%, Max: 40%, Default: 30%).
+
+### Components
+- **Tooltip**: Implemented a custom `Tooltip` component (HeroUI style) to replace default browser tooltips.
+
+### Documentation
+- **Proposals**: Added `LAUNCH_GAME_PROPOSAL.md` detailing the backend requirements for the game launcher feature.
+
 ## Update - Sharing UI & Visual Polish (Dec 4, 2025)
 
 ### Sharing Panel Overhaul

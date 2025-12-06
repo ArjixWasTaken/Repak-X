@@ -1,0 +1,143 @@
+/* HeroUI Tooltip Styles */
+.heroui-tooltip-trigger {
+  display: inline-flex;
+  position: relative;
+  box-sizing: border-box;
+}
+
+.heroui-tooltip-content {
+  position: absolute;
+  z-index: 1000;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  font-weight: 400;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  pointer-events: none;
+  white-space: nowrap;
+  max-width: 300px;
+  width: max-content;
+}
+
+/* Placements */
+.heroui-tooltip-content[data-placement="top"] {
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-bottom: var(--tooltip-offset, 7px);
+}
+
+.heroui-tooltip-content[data-placement="bottom"] {
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: var(--tooltip-offset, 7px);
+}
+
+.heroui-tooltip-content[data-placement="left"] {
+  right: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-right: var(--tooltip-offset, 7px);
+}
+
+.heroui-tooltip-content[data-placement="right"] {
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: var(--tooltip-offset, 7px);
+}
+
+/* Colors */
+.heroui-tooltip-content.default {
+  background-color: #ffffff;
+  color: #000000;
+}
+[data-theme="dark"] .heroui-tooltip-content.default {
+  background-color: #27272a;
+  color: #ffffff;
+  border: 1px solid #3f3f46;
+}
+
+.heroui-tooltip-content.primary {
+  background-color: #006fee;
+  color: #ffffff;
+}
+
+.heroui-tooltip-content.secondary {
+  background-color: #7828c8;
+  color: #ffffff;
+}
+
+.heroui-tooltip-content.success {
+  background-color: #17c964;
+  color: #000000;
+}
+
+.heroui-tooltip-content.warning {
+  background-color: #f5a524;
+  color: #000000;
+}
+
+.heroui-tooltip-content.danger {
+  background-color: #f31260;
+  color: #ffffff;
+}
+
+/* Sizes */
+.heroui-tooltip-content.sm {
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.heroui-tooltip-content.md {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+}
+
+.heroui-tooltip-content.lg {
+  padding: 0.75rem 1rem;
+  font-size: 1rem;
+}
+
+/* Radius */
+.heroui-tooltip-content.radius-none { border-radius: 0; }
+.heroui-tooltip-content.radius-sm { border-radius: 0.25rem; }
+.heroui-tooltip-content.radius-md { border-radius: 0.5rem; }
+.heroui-tooltip-content.radius-lg { border-radius: 0.75rem; }
+.heroui-tooltip-content.radius-full { border-radius: 9999px; }
+
+/* Arrow */
+.heroui-tooltip-arrow {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: rotate(45deg);
+  z-index: -1;
+}
+
+[data-placement="top"] .heroui-tooltip-arrow {
+  bottom: -4px;
+  left: 50%;
+  margin-left: -4px;
+}
+
+[data-placement="bottom"] .heroui-tooltip-arrow {
+  top: -4px;
+  left: 50%;
+  margin-left: -4px;
+}
+
+[data-placement="left"] .heroui-tooltip-arrow {
+  right: -4px;
+  top: 50%;
+  margin-top: -4px;
+}
+
+[data-placement="right"] .heroui-tooltip-arrow {
+  left: -4px;
+  top: 50%;
+  margin-top: -4px;
+}

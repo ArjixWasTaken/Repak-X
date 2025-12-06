@@ -1,15 +1,20 @@
 /* Badge Base Styles */
-.character-badge,
 .category-badge,
 .additional-badge {
   display: inline-block;
   padding: 0.4rem 0.75rem;
-  border-radius: 999px;
+  border-radius: 4px;
   font-weight: 600;
   font-size: 0.85rem;
 }
 
 .character-badge {
+  display: inline-block;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  text-align: center;
   background: rgba(255,255,255,0.08);
   color: var(--text-primary);
   border: 1px solid var(--panel-border);

@@ -1,0 +1,130 @@
+/* Alert Component Styles */
+.heroui-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 12px;
+  font-size: 0.875rem;
+  position: relative;
+  transition: all 0.2s ease;
+  border: 1px solid transparent;
+}
+
+/* Variants */
+.heroui-alert.flat {
+  background-color: var(--alert-bg);
+  color: var(--alert-text);
+}
+
+.heroui-alert.solid {
+  background-color: var(--alert-color);
+  color: #fff;
+}
+
+.heroui-alert.bordered {
+  background-color: transparent;
+  border-color: var(--alert-color);
+  color: var(--alert-text);
+}
+
+/* Colors */
+.heroui-alert.default {
+  --alert-bg: #f4f4f5;
+  --alert-color: #3f3f46;
+  --alert-text: #3f3f46;
+}
+[data-theme="dark"] .heroui-alert.default {
+  --alert-bg: #27272a;
+  --alert-color: #a1a1aa;
+  --alert-text: #e4e4e7;
+}
+
+.heroui-alert.primary {
+  --alert-bg: #dbeafe;
+  --alert-color: #006fee;
+  --alert-text: #004493;
+}
+[data-theme="dark"] .heroui-alert.primary {
+  --alert-bg: #002e62;
+  --alert-color: #006fee;
+  --alert-text: #93c5fd;
+}
+
+.heroui-alert.success {
+  --alert-bg: #dcfce7;
+  --alert-color: #17c964;
+  --alert-text: #14532d;
+}
+[data-theme="dark"] .heroui-alert.success {
+  --alert-bg: #052e16;
+  --alert-color: #17c964;
+  --alert-text: #86efac;
+}
+
+.heroui-alert.warning {
+  --alert-bg: #fef9c3;
+  --alert-color: #f5a524;
+  --alert-text: #713f12;
+}
+[data-theme="dark"] .heroui-alert.warning {
+  --alert-bg: #422006;
+  --alert-color: #f5a524;
+  --alert-text: #fde047;
+}
+
+.heroui-alert.danger {
+  --alert-bg: #fee2e2;
+  --alert-color: #f31260;
+  --alert-text: #7f1d1d;
+}
+[data-theme="dark"] .heroui-alert.danger {
+  --alert-bg: #310413;
+  --alert-color: #f31260;
+  --alert-text: #fca5a5;
+}
+
+/* Elements */
+.heroui-alert-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--alert-color);
+}
+.heroui-alert.solid .heroui-alert-icon {
+  color: #fff;
+}
+
+.heroui-alert-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.heroui-alert-title {
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.heroui-alert-description {
+  font-weight: 400;
+  opacity: 0.9;
+  line-height: 1.4;
+}
+
+.heroui-alert-close {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  margin: -4px -4px 0 0;
+  border-radius: 50%;
+  color: currentColor;
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.heroui-alert-close:hover {
+  opacity: 1;
+  background: rgba(0,0,0,0.05);
+}

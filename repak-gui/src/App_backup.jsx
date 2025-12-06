@@ -16,7 +16,8 @@ import {
   GridView as GridViewIcon,
   ViewModule as ViewModuleIcon,
   ViewList as ViewListIcon,
-  Wifi as WifiIcon
+  Wifi as WifiIcon,
+  ViewSidebar as ViewSidebarIcon
 } from '@mui/icons-material'
 import ModDetailsPanel from './components/ModDetailsPanel'
 import InstallModPanel from './components/InstallModPanel'
@@ -24,6 +25,7 @@ import SettingsPanel from './components/SettingsPanel'
 import SharingPanel from './components/SharingPanel'
 import FileTree from './components/FileTree'
 import ContextMenu from './components/ContextMenu'
+import { AuroraText } from './components/ui/AuroraText'
 import characterData from './data/character_data.json'
 import './App.css'
 import './styles/theme.css'
@@ -81,7 +83,7 @@ function getAdditionalCategories(details) {
 }
 
 // Mod Item Component
-function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleModSelection, handleToggleMod, handleDeleteMod, handleRemoveTag, formatFileSize, hideSuffix, onContextMenu }) {
+function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleModSelection, handleToggleMod, handleDeleteMod, handleRemoveTag, formatFileSize, hideSuffix, onContextMenu, handleSetPriority }) {
   const [isDeleteHolding, setIsDeleteHolding] = useState(false)
   const holdTimeoutRef = useRef(null)
   const rawName = mod.custom_name || mod.path.split('\\').pop()
@@ -140,7 +142,7 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
                 setSelectedMod(mod)
               }
             }}
-            whileHover={{ color: '#4a9eff' }}
+            whileHover={{ color: 'var(--accent-primary)' }}
             title={rawName}
           >
             <span className="mod-name-text">
@@ -174,6 +176,41 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
       )}
       
       <div className="mod-card-row mod-card-actions">
+        <div className="priority-control" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', marginRight: '8px' }}>
+          <span style={{ fontSize: '0.7rem', opacity: 0.7, marginRight: '4px' }}>Pri:</span>
+          <input
+            type="number"
+            min="0"
+            max="999"
+            defaultValue={mod.priority || 0}
+            onBlur={(e) => {
+              const val = parseInt(e.target.value, 10)
+              if (!isNaN(val) && val !== mod.priority) {
+                handleSetPriority(mod.path, val)
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                const val = parseInt(e.currentTarget.value, 10)
+                if (!isNaN(val) && val !== mod.priority) {
+                  handleSetPriority(mod.path, val)
+                }
+                e.currentTarget.blur()
+              }
+            }}
+            className="priority-input"
+            style={{ 
+              width: '40px', 
+              background: 'rgba(0,0,0,0.3)', 
+              border: '1px solid rgba(255,255,255,0.1)', 
+              color: 'white', 
+              borderRadius: '3px',
+              padding: '2px 4px',
+              fontSize: '0.8rem',
+              textAlign: 'center'
+            }}
+          />
+        </div>
         <Tooltip title={mod.enabled ? 'Disable mod' : 'Enable mod'}>
           <label
             className={`mod-switch ${mod.enabled ? 'is-on' : ''}`}
@@ -208,12 +245,41 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
   )
 }
 
+function ClashPanel({ clashes, onClose }) {
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
+        <h2>Mod Conflicts ({clashes.length})</h2>
+        <div className="clash-list" style={{ overflowY: 'auto', flex: 1, padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
+          {clashes.length === 0 ? (
+            <p>No conflicts found!</p>
+          ) : (
+            clashes.map((clash, i) => (
+              <div key={i} className="clash-item" style={{ marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem' }}>
+                <div className="clash-file" style={{ color: '#aaa', fontSize: '0.9rem', marginBottom: '0.25rem' }}>{clash.file_path}</div>
+                <div className="clash-mods" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  {clash.mod_paths.map(path => (
+                    <span key={path} className="tag" style={{ background: 'rgba(255, 100, 100, 0.2)', border: '1px solid rgba(255, 100, 100, 0.4)' }}>
+                      {path.split(/[/\\]/).pop()}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
+          <button className="btn-modern" onClick={onClose}>Close</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function App() {
-  // Add these state variables
   const [globalUsmap, setGlobalUsmap] = useState('');
   const [hideSuffix, setHideSuffix] = useState(false);
   
-  // Add these new state variables
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
   const [showSettings, setShowSettings] = useState(false);
@@ -227,7 +293,9 @@ function App() {
   const [gameRunning, setGameRunning] = useState(false)
   const [version, setVersion] = useState('')
   const [selectedMod, setSelectedMod] = useState(null)
-  const [leftPanelWidth, setLeftPanelWidth] = useState(60) // percentage
+  const [leftPanelWidth, setLeftPanelWidth] = useState(100) // percentage
+  const [lastPanelWidth, setLastPanelWidth] = useState(70) // to restore after collapse (default 30% right panel)
+  const [isRightPanelOpen, setIsRightPanelOpen] = useState(false)
   const [isResizing, setIsResizing] = useState(false)
   const [selectedMods, setSelectedMods] = useState(new Set())
   const [showBulkActions, setShowBulkActions] = useState(false)
@@ -235,15 +303,14 @@ function App() {
   const [allTags, setAllTags] = useState([])
   const [filterTag, setFilterTag] = useState('')
   const [filterType, setFilterType] = useState('')
-  // New: Mod Detection API integration
   const [modDetails, setModDetails] = useState({}) // { [path]: ModDetails }
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [selectedCharacters, setSelectedCharacters] = useState(new Set()) // values: character_name, '__generic', '__multi'
   const [selectedCategories, setSelectedCategories] = useState(new Set()) // category strings
   const [availableCharacters, setAvailableCharacters] = useState([])
   const [availableCategories, setAvailableCategories] = useState([])
-  const [showCharacterFilters, setShowCharacterFilters] = useState(true)
-  const [showTypeFilters, setShowTypeFilters] = useState(true)
+  const [showCharacterFilters, setShowCharacterFilters] = useState(false)
+  const [showTypeFilters, setShowTypeFilters] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [expandedFolders, setExpandedFolders] = useState(new Set())
   const [showInstallPanel, setShowInstallPanel] = useState(false)
@@ -251,11 +318,40 @@ function App() {
   const [installLogs, setInstallLogs] = useState([])
   const [showInstallLogs, setShowInstallLogs] = useState(false)
   const [selectedFolderId, setSelectedFolderId] = useState('all')
-  const [viewMode, setViewMode] = useState('grid') // 'grid', 'compact', 'list'
+  const [viewMode, setViewMode] = useState('list') // 'grid', 'compact', 'list'
   const [contextMenu, setContextMenu] = useState(null) // { x, y, mod }
   // OPTIONAL: user-resizable height
   const [drawerHeight, setDrawerHeight] = useState(380)
   const resizingRef = useRef(false)
+  
+  const [clashes, setClashes] = useState([])
+  const [showClashPanel, setShowClashPanel] = useState(false)
+
+  const handleCheckClashes = async () => {
+    try {
+      setStatus('Checking for clashes...')
+      const result = await invoke('check_mod_clashes')
+      setClashes(result)
+      setShowClashPanel(true)
+      setStatus(`Found ${result.length} clashes`)
+    } catch (error) {
+      setStatus('Error checking clashes: ' + error)
+    }
+  }
+
+  const handleSetPriority = async (modPath, priority) => {
+    if (gameRunning) {
+      setStatus('Cannot change priority while game is running')
+      return
+    }
+    try {
+      await invoke('set_mod_priority', { modPath, priority })
+      setStatus(`Priority set to ${priority}`)
+      await loadMods()
+    } catch (error) {
+      setStatus('Error setting priority: ' + error)
+    }
+  }
 
   const handleContextMenu = (e, mod) => {
     e.preventDefault()
@@ -785,14 +881,30 @@ function App() {
     const containerWidth = e.currentTarget.offsetWidth || window.innerWidth
     const newLeftWidth = (e.clientX / containerWidth) * 100
     
-    // Constrain between 30% and 70%
-    if (newLeftWidth >= 30 && newLeftWidth <= 70) {
+    // Constrain right panel between 25% and 40% (left panel 60% - 75%)
+    if (newLeftWidth >= 60 && newLeftWidth <= 75) {
       setLeftPanelWidth(newLeftWidth)
+      if (isRightPanelOpen) {
+        setLastPanelWidth(newLeftWidth)
+      }
     }
   }
 
   const handleResizeEnd = () => {
     setIsResizing(false)
+  }
+
+  const toggleRightPanel = () => {
+    if (isRightPanelOpen) {
+      // Collapse
+      setLastPanelWidth(leftPanelWidth)
+      setLeftPanelWidth(100)
+      setIsRightPanelOpen(false)
+    } else {
+      // Expand
+      setLeftPanelWidth(lastPanelWidth)
+      setIsRightPanelOpen(true)
+    }
   }
 
   useEffect(() => {
@@ -962,6 +1074,13 @@ function App() {
         />
       )}
 
+      {showClashPanel && (
+        <ClashPanel
+          clashes={clashes}
+          onClose={() => setShowClashPanel(false)}
+        />
+      )}
+
       {showSettings && (
         <SettingsPanel
           settings={{ globalUsmap, hideSuffix }}
@@ -990,7 +1109,7 @@ function App() {
       <header className="header" style={{ display: 'flex', alignItems: 'center' }}>
         <img src={logo} alt="Repak Icon" className="repak-icon" style={{ width: '50px', height: '50px', marginRight: '10px' }} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
-          <h1 style={{ margin: 0 }}>Repak GUI Revamped [DEV]</h1>
+          <h1 style={{ margin: 0 }}>Repak GUI <AuroraText>Revamped</AuroraText> [DEV]</h1>
           <span className="version" style={{ fontSize: '0.9rem', opacity: 0.7 }}>v{version}</span>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto' }}>
@@ -1002,6 +1121,12 @@ function App() {
             />
             <span style={{ fontSize: '0.8rem', color: '#ff6b6b', fontWeight: 'bold' }}>DEV: Game Running</span>
           </label>
+          {gameRunning && (
+            <div className="game-running-indicator">
+              <span className="blink-icon">⚠️</span>
+              <span className="running-text">Game Running</span>
+            </div>
+          )}
           <button 
             onClick={() => setShowSharingPanel(true)} 
             className="btn-settings"
@@ -1013,14 +1138,8 @@ function App() {
             onClick={() => setShowSettings(true)} 
             className="btn-settings"
           >
-            ⚙️ Settings
+            <SettingsIcon /> Settings
           </button>
-          {gameRunning && (
-            <div className="game-running-indicator">
-              <span className="blink-icon">⚠️</span>
-              <span className="running-text">Game Running</span>
-            </div>
-          )}
         </div>
       </header>
 
@@ -1163,17 +1282,6 @@ function App() {
               <div className="sidebar-header">
                 <h3>Folders</h3>
                 <div style={{ display: 'flex', gap: '4px' }}>
-                  <button 
-                    onClick={async () => {
-                      await loadFolders()
-                      await loadMods()
-                      setStatus('Folders refreshed')
-                    }} 
-                    className="btn-icon" 
-                    title="Refresh Folders"
-                  >
-                    <RefreshIcon fontSize="small" />
-                  </button>
                   <button onClick={handleCreateFolder} className="btn-icon" title="New Folder">
                     <CreateNewFolderIcon fontSize="small" />
                   </button>
@@ -1225,10 +1333,15 @@ function App() {
                   <h2>
                     {selectedFolderId === 'all' ? 'All Mods' : 
                      folders.find(f => f.id === selectedFolderId)?.name || 'Unknown Folder'}
+                    <span className="mod-count" style={{ marginLeft: '0.75rem', opacity: 0.5, fontSize: '0.8em', fontWeight: 'normal' }}>
+                      ({filteredMods.length})
+                    </span>
                   </h2>
-                  <span className="mod-count">({filteredMods.length})</span>
                 </div>
                 <div className="header-actions">
+                  <button onClick={handleCheckClashes} className="btn-ghost" title="Check for conflicts" style={{ marginRight: '0.5rem', fontSize: '0.8rem' }}>
+                    ⚠️ Check Conflicts
+                  </button>
                   <div className="view-switcher">
                     <button 
                       onClick={() => setViewMode('grid')} 
@@ -1252,6 +1365,14 @@ function App() {
                       <ViewListIcon fontSize="small" />
                     </button>
                   </div>
+                  <div className="divider-vertical" />
+                  <button 
+                    onClick={toggleRightPanel} 
+                    className={`btn-ghost ${!isRightPanelOpen ? 'active' : ''}`}
+                    title={isRightPanelOpen ? "Collapse Details" : "Expand Details"}
+                  >
+                    <ViewSidebarIcon fontSize="small" style={{ transform: isRightPanelOpen ? 'none' : 'rotate(180deg)' }} />
+                  </button>
                   <div className="divider-vertical" />
                   <button onClick={loadMods} className="btn-ghost">
                     <RefreshIcon fontSize="small" />
@@ -1305,6 +1426,7 @@ function App() {
                       formatFileSize={formatFileSize}
                       hideSuffix={hideSuffix}
                       onContextMenu={handleContextMenu}
+                      handleSetPriority={handleSetPriority}
                     />
                   ))
                 )}
@@ -1313,17 +1435,19 @@ function App() {
           </div>
 
           {/* Resize Handle */}
-          <div 
-            className="resize-handle"
-            onMouseDown={handleResizeStart}
-            style={{ left: `${leftPanelWidth}%` }}
-          />
+          {isRightPanelOpen && (
+            <div 
+              className="resize-handle"
+              onMouseDown={handleResizeStart}
+              style={{ left: `${leftPanelWidth}%` }}
+            />
+          )}
 
           {/* Right Panel - Mod Details (Always Visible) */}
-          <div className="right-panel" style={{ width: `${100 - leftPanelWidth}%` }}>
+          <div className="right-panel" style={{ width: `${100 - leftPanelWidth}%`, display: isRightPanelOpen ? 'flex' : 'none' }}>
             {selectedMod ? (
-              <div className="mod-details-and-contents" style={{ display: 'flex', gap: '1rem', alignItems: 'flex-start' }}>
-                <div style={{ flex: 1 }}>
+              <div className="mod-details-and-contents" style={{ display: 'flex', gap: '1rem', height: '100%', overflow: 'hidden' }}>
+                <div style={{ flex: 1, minWidth: '200px', height: '100%' }}>
                   <ModDetailsPanel 
                     mod={selectedMod}
                     initialDetails={modDetails[selectedMod.path]}
@@ -1331,7 +1455,7 @@ function App() {
                   />
                 </div>
 
-                <div className="selected-mod-contents" style={{ width: '360px', maxWidth: '45%', minWidth: '240px' }}>
+                <div className="selected-mod-contents" style={{ width: '360px', maxWidth: '45%', minWidth: '200px', height: '100%', overflow: 'auto' }}>
                   <h3 style={{ marginTop: 0 }}>Contents</h3>
                   <FileTree files={selectedMod.file_contents || selectedMod.files || selectedMod.file_list || []} />
                 </div>

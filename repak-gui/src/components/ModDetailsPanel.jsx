@@ -72,10 +72,15 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
 
   if (!mod) return null
 
+  const rawName = mod.custom_name || mod.path.split('\\').pop()
+  const nameWithoutExt = rawName.replace(/\.[^/.]+$/, '')
+  const suffixMatch = nameWithoutExt.match(/(_\d+_P)$/i)
+  const cleanName = suffixMatch ? nameWithoutExt.slice(0, -suffixMatch[0].length) : nameWithoutExt
+
   return (
     <div className="details-panel">
       <div className="details-header">
-        <h2>{mod.custom_name || mod.path.split('\\').pop()}</h2>
+        <h2>{cleanName}</h2>
       </div>
       
       <div className="details-body">
@@ -146,16 +151,12 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
             <div className="detail-section">
               <h3>Information</h3>
               <div className="detail-item">
-                <span className="detail-label">Files:</span>
+                <span className="detail-label">Assets Count:</span>
                 <span className="detail-value">{details.file_count}</span>
               </div>
               <div className="detail-item">
                 <span className="detail-label">Size:</span>
                 <span className="detail-value">{formatFileSize(details.total_size)}</span>
-              </div>
-              <div className="detail-item">
-                <span className="detail-label">Enabled:</span>
-                <span className="detail-value">{mod.enabled ? 'Yes' : 'No'}</span>
               </div>
               {mod.folder_id && (
                 <div className="detail-item">
