@@ -193,21 +193,25 @@ try {
     # Step 5: Build Rust Workspace (Backend + Tauri)
     # ============================================
     Write-Step "[5/5] Building Rust Workspace (Backend + Tauri)"
-    
-    Write-Info "Building Rust workspace with cargo..."
-    Write-Info "This may take several minutes on first build..."
-    
-    $cargoArgs = @("build")
-    if ($Configuration -eq "release") {
-        $cargoArgs += "--release"
+
+    Write-Info "Building Tauri application via CLI (ensures bundled frontend)..."
+    Push-Location $frontendDir
+
+    $tauriArgs = @("build")
+    if ($Configuration -eq "debug") {
+        $tauriArgs += "--debug"
     }
-    
-    & cargo $cargoArgs
-    if ($LASTEXITCODE -ne 0) {
-        Write-Error-Custom "Cargo build failed!"
+
+    & npx tauri $tauriArgs
+    $tauriExitCode = $LASTEXITCODE
+
+    Pop-Location
+
+    if ($tauriExitCode -ne 0) {
+        Write-Error-Custom "Tauri build failed!"
         exit 1
     }
-    Write-Success "Rust workspace built successfully"
+    Write-Success "Tauri application built successfully"
 
     # ============================================
     # Build Complete - Summary
