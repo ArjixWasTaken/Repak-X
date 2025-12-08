@@ -21,7 +21,7 @@ At a high level it:
   Handles pak unpacking/packing, IOStore building, and communication with UAsset tools.
 
 - **C# helper tools**  
-  - `UAssetBridge.exe` – optional texture processing and conversions.  
+  - `UAssetBridge.exe` – optional texture processing and conversions (Very experimental at the moment and the patch doesnt properly apply ingame yet).  
   - `StaticMeshSerializeSizeFixer.exe` – mesh fixups applied during repack.
 
 - **UAsset / IOStore logic**  
@@ -41,8 +41,6 @@ End users normally interact only with the GUI; the backend and helper tools run 
 2. Extract it to any writable folder (avoid `Program Files` to keep permissions simple).
 3. Run `repak-gui.exe`.
 
-Optional (textures): place `uassetbridge/UAssetBridge.exe` next to `repak-gui.exe` to enable the texture processing pipeline. Without it, textures are handled in a simpler, safe way (you may see non-fatal warnings).
-
 ## Basic Usage
 
 1. Drag a `.pak` mod into the GUI.
@@ -56,7 +54,7 @@ Optional (textures): place `uassetbridge/UAssetBridge.exe` next to `repak-gui.ex
    - `<stem>_9999999_P.ucas`
    - `<stem>_9999999_P.pak` (small, uncompressed companion)
 
-Use the `_9999999_P` suffix so the game prioritizes your mod over base content.
+Use the `_9999999_P` (The App will autocomplete it for you if its missing but if you want to be extra safe do the suffix manually) suffix so the game prioritizes your mod over base content.
 
 ## How It Works (Short Version)
 
@@ -68,7 +66,7 @@ Use the `_9999999_P` suffix so the game prioritizes your mod over base content.
 ## Troubleshooting
 
 - **Textures look wrong or warnings mention `UAssetBridge.exe`**  
-  Add `uassetbridge/UAssetBridge.exe` next to `repak-gui.exe` to enable the full texture pipeline.
+  Add `uassetbridge/UAssetBridge.exe` next to `repak-gui.exe` to enable the full texture pipeline.(Experimental. Being worked on proper function)
 
 - **Mod not loading or game issues**  
   Double-check that the output files are in the correct `Paks/~mods` folder and use the `_9999999_P` suffix.  
@@ -77,8 +75,6 @@ Use the `_9999999_P` suffix so the game prioritizes your mod over base content.
 ## Development
 
 The project is a Tauri (Rust) + React app with C# helper tools. For building from source, scripts such as `build_contributor.ps1` and `build_app.ps1` orchestrate the full pipeline.
-
-For detailed build requirements and workflow, see **[CONTRIBUTING.md](CONTRIBUTING.md)**.
 
 ## Acknowledgements
 
