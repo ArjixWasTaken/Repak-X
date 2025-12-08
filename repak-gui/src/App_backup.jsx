@@ -17,15 +17,18 @@ import {
   ViewModule as ViewModuleIcon,
   ViewList as ViewListIcon,
   Wifi as WifiIcon,
-  ViewSidebar as ViewSidebarIcon
+  ViewSidebar as ViewSidebarIcon,
+  PlayArrow as PlayArrowIcon
 } from '@mui/icons-material'
 import ModDetailsPanel from './components/ModDetailsPanel'
 import InstallModPanel from './components/InstallModPanel'
 import SettingsPanel from './components/SettingsPanel'
 import SharingPanel from './components/SharingPanel'
 import FileTree from './components/FileTree'
+import FolderTree from './components/FolderTree'
 import ContextMenu from './components/ContextMenu'
 import { AuroraText } from './components/ui/AuroraText'
+import Switch from './components/ui/Switch'
 import characterData from './data/character_data.json'
 import './App.css'
 import './styles/theme.css'
@@ -151,7 +154,6 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
             </span>
           </motion.button>
         </div>
-        <span className="mod-size">{formatFileSize(mod.file_size)}</span>
       </div>
       
       {tags.length > 0 && (
@@ -176,6 +178,7 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
       )}
       
       <div className="mod-card-row mod-card-actions">
+        <span className="mod-size" style={{ marginRight: '12px', fontSize: '0.85rem', opacity: 0.7 }}>{formatFileSize(mod.file_size)}</span>
         <div className="priority-control" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', marginRight: '8px' }}>
           <span style={{ fontSize: '0.7rem', opacity: 0.7, marginRight: '4px' }}>Pri:</span>
           <input
@@ -212,20 +215,18 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
           />
         </div>
         <Tooltip title={mod.enabled ? 'Disable mod' : 'Enable mod'}>
-          <label
-            className={`mod-switch ${mod.enabled ? 'is-on' : ''}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <input
-              type="checkbox"
+          <div className="mod-switch-wrapper" onClick={(e) => e.stopPropagation()}>
+            <Switch
+              size="sm"
+              color="primary"
               checked={mod.enabled}
-              onChange={(e) => {
-                e.stopPropagation()
+              onChange={(_, event) => {
+                event?.stopPropagation()
                 handleToggleMod(mod.path)
               }}
+              className="mod-switch"
             />
-            <span className="mod-switch-track" />
-          </label>
+          </div>
         </Tooltip>
         <Tooltip title="Hold 2s to delete">
           <button
@@ -347,6 +348,13 @@ function App() {
     try {
       await invoke('set_mod_priority', { modPath, priority })
       setStatus(`Priority set to ${priority}`)
+      
+      // If the modified mod is currently selected, clear selection to force refresh of details
+      // This ensures the details panel updates with the new filename (since priority changes filename)
+      if (selectedMod && selectedMod.path === modPath) {
+        setSelectedMod(null)
+      }
+      
       await loadMods()
     } catch (error) {
       setStatus('Error setting priority: ' + error)
@@ -359,6 +367,15 @@ function App() {
       x: e.clientX,
       y: e.clientY,
       mod
+    })
+  }
+
+  const handleFolderContextMenu = (e, folder) => {
+    e.preventDefault()
+    setContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      folder
     })
   }
 
@@ -670,6 +687,36 @@ function App() {
     }
   }
 
+  const handleDevInstallPanel = () => {
+    const categories = ['Skin', 'Audio', 'UI', 'VFX', 'Mesh', 'Texture']
+    const additionalCats = ['Blueprint', 'Text', '']
+    
+    const getRandomMod = (i) => {
+      const randomChar = characterData[Math.floor(Math.random() * characterData.length)].name
+      const randomCat = categories[Math.floor(Math.random() * categories.length)]
+      const randomAdd = additionalCats[Math.floor(Math.random() * additionalCats.length)]
+      
+      let modType = `${randomChar} - ${randomCat}`
+      if (randomAdd) {
+        modType += ` [${randomAdd}]`
+      }
+      
+      return {
+        path: `C:\\Fake\\Path\\Mod${i}.pak`,
+        mod_name: `Mod${i}.pak`,
+        file_size: Math.floor(Math.random() * 1024 * 1024 * 50),
+        mod_type: modType,
+        auto_fix_mesh: Math.random() > 0.5,
+        auto_fix_texture: Math.random() > 0.5,
+        auto_fix_serialize_size: Math.random() > 0.5,
+        auto_to_repak: Math.random() > 0.5
+      }
+    }
+
+    setModsToInstall([getRandomMod(1), getRandomMod(2), getRandomMod(3)])
+    setShowInstallPanel(true)
+  }
+
   const handleDeleteMod = async (modPath) => {
     if (gameRunning) {
       setStatus('Cannot delete mods while game is running')
@@ -680,6 +727,12 @@ function App() {
     try {
       await invoke('delete_mod', { path: modPath })
       setStatus('Mod deleted')
+
+      // Clear selection if the deleted mod was selected
+      if (selectedMod && selectedMod.path === modPath) {
+        setSelectedMod(null)
+      }
+
       await loadMods()
     } catch (error) {
       setStatus('Error deleting mod: ' + error)
@@ -714,7 +767,7 @@ function App() {
   }
 
   const handleDeleteFolder = async (folderId) => {
-    if (!confirm('Delete this folder? Mods will not be deleted.')) return
+    // No confirmation prompt needed here, the hold-to-delete button handles the intent
     
     try {
       await invoke('delete_folder', { id: folderId })
@@ -755,9 +808,14 @@ function App() {
       return
     }
 
+    // Check if folderId corresponds to the root folder (depth 0)
+    // If so, pass null to backend to move to root
+    const targetFolder = folders.find(f => f.id === folderId)
+    const effectiveFolderId = (targetFolder && targetFolder.depth === 0) ? null : folderId
+
     try {
       for (const modPath of selectedMods) {
-        await invoke('assign_mod_to_folder', { modPath, folderId })
+        await invoke('assign_mod_to_folder', { modPath, folderId: effectiveFolderId })
       }
       setStatus(`Moved ${selectedMods.size} mod(s) to folder!`)
       setSelectedMods(new Set())
@@ -773,8 +831,13 @@ function App() {
       setStatus('Cannot move mods while game is running')
       return
     }
+
+    // Check if folderId corresponds to the root folder (depth 0)
+    const targetFolder = folders.find(f => f.id === folderId)
+    const effectiveFolderId = (targetFolder && targetFolder.depth === 0) ? null : folderId
+
     try {
-      await invoke('assign_mod_to_folder', { modPath, folderId })
+      await invoke('assign_mod_to_folder', { modPath, folderId: effectiveFolderId })
       setStatus('Mod moved to folder')
       await loadMods()
       await loadFolders()
@@ -808,6 +871,13 @@ function App() {
     } catch (error) {
       setStatus(`Error: ${error}`)
     }
+  }
+
+  // Keep the global tag list in sync when the Install panel creates a new tag
+  const registerTagFromInstallPanel = (tag) => {
+    const trimmed = (tag || '').trim()
+    if (!trimmed) return
+    setAllTags(prev => prev.includes(trimmed) ? prev : [...prev, trimmed].sort())
   }
 
   const handleRemoveTag = async (modPath, tag) => {
@@ -856,8 +926,12 @@ function App() {
     
     if (modPath) {
       try {
-        console.log('Calling assign_mod_to_folder with:', { modPath, folderId })
-        await invoke('assign_mod_to_folder', { modPath, folderId })
+        // Check if folderId corresponds to the root folder (depth 0)
+        const targetFolder = folders.find(f => f.id === folderId)
+        const effectiveFolderId = (targetFolder && targetFolder.depth === 0) ? null : folderId
+
+        console.log('Calling assign_mod_to_folder with:', { modPath, folderId: effectiveFolderId })
+        await invoke('assign_mod_to_folder', { modPath, folderId: effectiveFolderId })
         setStatus(`Mod moved to ${folderId}!`)
         await loadMods()
         await loadFolders()
@@ -926,13 +1000,8 @@ function App() {
     return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
   }
 
-  // Compute filtered mods
-  const filteredMods = mods.filter(mod => {
-    // Folder filter
-    if (selectedFolderId !== 'all') {
-      if (mod.folder_id !== selectedFolderId) return false
-    }
-
+  // Compute base filtered mods (excluding folder filter)
+  const baseFilteredMods = mods.filter(mod => {
     // Search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
@@ -983,6 +1052,16 @@ function App() {
     return true
   })
 
+  // Apply folder filter to get final list for display
+  const filteredMods = baseFilteredMods.filter(mod => {
+    if (selectedFolderId === 'all') return true
+    
+    // Match exact folder OR subfolder
+    // e.g. if selected is "Category", match "Category" and "Category/Sub"
+    return mod.folder_id === selectedFolderId || 
+           (mod.folder_id && mod.folder_id.startsWith(selectedFolderId + '/'))
+  })
+
   // Group mods by folder
   const modsByFolder = {}
   modsByFolder['_root'] = filteredMods.filter(m => !m.folder_id)
@@ -1006,10 +1085,38 @@ function App() {
       setInstallLogs([])
       setShowInstallLogs(true)
       setStatus('Installing mods...')
+
       await invoke('install_mods', { mods: modsWithSettings })
+
+      // Mirror tag assignment flow used by the main list/context menu
+      const typeTracker = {}
+      for (const mod of modsWithSettings) {
+        const modType = mod.mod_type || 'Unknown'
+        const count = typeTracker[modType] || 0
+        const minNines = 7 + count
+        const name = mod.customName || mod.mod_name
+        const filename = `${normalizeModBaseName(name, minNines)}.pak`
+
+        if (mod.selectedTags && mod.selectedTags.length > 0) {
+          const separator = gamePath.includes('\\') ? '\\' : '/'
+          const fullPath = `${gamePath}${separator}${filename}`
+
+          for (const tag of mod.selectedTags) {
+            try {
+              await invoke('add_custom_tag', { modPath: fullPath, tag })
+            } catch (e) {
+              console.error(`Failed to add tag ${tag} to ${fullPath}:`, e)
+            }
+          }
+        }
+
+        typeTracker[modType] = count + 1
+      }
+
       setStatus('Mods installed successfully!')
       await loadMods()
       await loadFolders()
+      await loadTags()
     } catch (error) {
       setStatus(`Installation failed: ${error}`)
     }
@@ -1069,6 +1176,8 @@ function App() {
       {showInstallPanel && (
         <InstallModPanel
           mods={modsToInstall}
+          allTags={allTags}
+          onCreateTag={registerTagFromInstallPanel}
           onInstall={handleInstallMods}
           onCancel={() => setShowInstallPanel(false)}
         />
@@ -1113,6 +1222,23 @@ function App() {
           <span className="version" style={{ fontSize: '0.9rem', opacity: 0.7 }}>v{version}</span>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto' }}>
+          <button 
+            className="btn-settings"
+            title="Launch Marvel Rivals (Coming Soon)"
+            style={{ 
+              background: 'rgba(74, 158, 255, 0.1)', 
+              color: '#4a9eff', 
+              border: '1px solid rgba(74, 158, 255, 0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontWeight: 600
+            }}
+            onClick={() => alert('Launch Game feature requires backend configuration. See docs/LAUNCH_GAME_PROPOSAL.md')}
+          >
+            <PlayArrowIcon /> Play
+          </button>
+
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', background: 'rgba(255,0,0,0.1)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255,0,0,0.3)' }}>
             <input 
               type="checkbox" 
@@ -1121,6 +1247,21 @@ function App() {
             />
             <span style={{ fontSize: '0.8rem', color: '#ff6b6b', fontWeight: 'bold' }}>DEV: Game Running</span>
           </label>
+          <button
+            onClick={handleDevInstallPanel}
+            style={{
+              background: 'rgba(255, 165, 0, 0.1)',
+              color: 'orange',
+              border: '1px solid rgba(255, 165, 0, 0.3)',
+              padding: '4px 8px',
+              borderRadius: '4px',
+              fontSize: '0.8rem',
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            DEV: Install Panel
+          </button>
           {gameRunning && (
             <div className="game-running-indicator">
               <span className="blink-icon">⚠️</span>
@@ -1288,41 +1429,21 @@ function App() {
                 </div>
               </div>
               <div className="folder-list">
-                <div 
-                  className={`folder-item ${selectedFolderId === 'all' ? 'active' : ''} ${filteredMods.length === 0 ? 'empty' : ''}`}
-                  onClick={() => setSelectedFolderId('all')}
-                >
-                  <FolderIcon fontSize="small" />
-                  <span className="folder-name">All Mods</span>
-                  <span className="folder-count">{filteredMods.length}</span>
-                </div>
-                {folders.map(folder => {
-                  const count = filteredMods.filter(m => m.folder_id === folder.id).length;
-                  const hasFilters = selectedCharacters.size > 0 || selectedCategories.size > 0;
-                  // Hide empty folders when filters are active
-                  if (hasFilters && count === 0) return null;
-                  
-                  return (
-                    <div 
-                      key={folder.id} 
-                      className={`folder-item ${selectedFolderId === folder.id ? 'active' : ''} ${count === 0 ? 'empty' : ''}`}
-                      onClick={() => setSelectedFolderId(folder.id)}
-                    >
-                      <FolderIcon fontSize="small" />
-                      <span className="folder-name">{folder.name}</span>
-                      <span className="folder-count">{count}</span>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDeleteFolder(folder.id)
-                        }}
-                        className="btn-icon-small delete-folder"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  );
-                })}
+                <FolderTree 
+                  folders={folders}
+                  selectedFolderId={selectedFolderId}
+                  onSelect={setSelectedFolderId}
+                  onDelete={handleDeleteFolder}
+                  onContextMenu={handleFolderContextMenu}
+                  getCount={(id) => {
+                    if (id === 'all') return baseFilteredMods.length;
+                    return baseFilteredMods.filter(m => 
+                      m.folder_id === id || 
+                      (m.folder_id && m.folder_id.startsWith(id + '/'))
+                    ).length;
+                  }}
+                  hasFilters={selectedCharacters.size > 0 || selectedCategories.size > 0}
+                />
               </div>
             </div>
 
@@ -1537,13 +1658,20 @@ function App() {
           x={contextMenu.x}
           y={contextMenu.y}
           mod={contextMenu.mod}
+          folder={contextMenu.folder}
           onClose={closeContextMenu}
-          onAssignTag={(tag) => handleAddTagToSingleMod(contextMenu.mod.path, tag)}
-          onMoveTo={(folderId) => handleMoveSingleMod(contextMenu.mod.path, folderId)}
+          onAssignTag={(tag) => contextMenu.mod && handleAddTagToSingleMod(contextMenu.mod.path, tag)}
+          onMoveTo={(folderId) => contextMenu.mod && handleMoveSingleMod(contextMenu.mod.path, folderId)}
           onCreateFolder={handleCreateFolder}
           folders={folders}
-          onDelete={() => handleDeleteMod(contextMenu.mod.path)}
-          onToggle={() => handleToggleMod(contextMenu.mod.path)}
+          onDelete={() => {
+            if (contextMenu.folder) {
+              handleDeleteFolder(contextMenu.folder.id)
+            } else if (contextMenu.mod) {
+              handleDeleteMod(contextMenu.mod.path)
+            }
+          }}
+          onToggle={() => contextMenu.mod && handleToggleMod(contextMenu.mod.path)}
           allTags={allTags}
         />
       )}

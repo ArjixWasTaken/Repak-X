@@ -20,6 +20,7 @@ import {
   ViewSidebar as ViewSidebarIcon,
   PlayArrow as PlayArrowIcon
 } from '@mui/icons-material'
+import { RiDeleteBin2Fill } from 'react-icons/ri'
 import ModDetailsPanel from './components/ModDetailsPanel'
 import InstallModPanel from './components/InstallModPanel'
 import SettingsPanel from './components/SettingsPanel'
@@ -28,6 +29,8 @@ import FileTree from './components/FileTree'
 import FolderTree from './components/FolderTree'
 import ContextMenu from './components/ContextMenu'
 import { AuroraText } from './components/ui/AuroraText'
+import Switch from './components/ui/Switch'
+import NumberInput from './components/ui/NumberInput'
 import characterData from './data/character_data.json'
 import './App.css'
 import './styles/theme.css'
@@ -178,60 +181,29 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
       
       <div className="mod-card-row mod-card-actions">
         <span className="mod-size" style={{ marginRight: '12px', fontSize: '0.85rem', opacity: 0.7 }}>{formatFileSize(mod.file_size)}</span>
-        <div className="priority-control" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', marginRight: '8px' }}>
-          <span style={{ fontSize: '0.7rem', opacity: 0.7, marginRight: '4px' }}>Pri:</span>
-          <input
-            type="number"
-            min="0"
-            max="999"
-            defaultValue={mod.priority || 0}
-            onBlur={(e) => {
-              const val = parseInt(e.target.value, 10)
-              if (!isNaN(val) && val !== mod.priority) {
-                handleSetPriority(mod.path, val)
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const val = parseInt(e.currentTarget.value, 10)
-                if (!isNaN(val) && val !== mod.priority) {
-                  handleSetPriority(mod.path, val)
-                }
-                e.currentTarget.blur()
-              }
-            }}
-            className="priority-input"
-            style={{ 
-              width: '40px', 
-              background: 'rgba(0,0,0,0.3)', 
-              border: '1px solid rgba(255,255,255,0.1)', 
-              color: 'white', 
-              borderRadius: '3px',
-              padding: '2px 4px',
-              fontSize: '0.8rem',
-              textAlign: 'center'
-            }}
-          />
-        </div>
+        <NumberInput
+          value={mod.priority || 0}
+          min={0}
+          max={7}
+          onChange={(newPriority) => handleSetPriority(mod.path, newPriority)}
+        />
         <Tooltip title={mod.enabled ? 'Disable mod' : 'Enable mod'}>
-          <label
-            className={`mod-switch ${mod.enabled ? 'is-on' : ''}`}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <input
-              type="checkbox"
+          <div className="mod-switch-wrapper" onClick={(e) => e.stopPropagation()}>
+            <Switch
+              size="sm"
+              color="primary"
               checked={mod.enabled}
-              onChange={(e) => {
-                e.stopPropagation()
+              onChange={(_, event) => {
+                event?.stopPropagation()
                 handleToggleMod(mod.path)
               }}
+              className="mod-switch"
             />
-            <span className="mod-switch-track" />
-          </label>
+          </div>
         </Tooltip>
         <Tooltip title="Hold 2s to delete">
           <button
-            className={`btn-modern btn-danger hold-delete ${isDeleteHolding ? 'holding' : ''}`}
+            className={`hold-delete ${isDeleteHolding ? 'holding' : ''}`}
             onMouseDown={startDeleteHold}
             onMouseUp={cancelDeleteHold}
             onMouseLeave={cancelDeleteHold}
@@ -239,7 +211,7 @@ function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleM
             onTouchEnd={cancelDeleteHold}
             aria-label="Hold to delete mod"
           >
-            ×
+            <RiDeleteBin2Fill size={18} />
           </button>
         </Tooltip>
       </div>

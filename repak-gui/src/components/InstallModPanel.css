@@ -169,47 +169,176 @@
   padding: 1rem 1.5rem;
 }
 
-.mods-table {
-  width: 100%;
-  border-collapse: collapse;
+.mods-table-container.card-mode {
+  padding-bottom: 0;
 }
 
-.mods-table thead {
-  position: sticky;
-  top: 0;
-  background: var(--bg-light);
-  z-index: 1;
+.install-empty-state {
+  text-align: center;
+  color: var(--text-secondary);
+  padding: 2rem 0;
 }
 
-.mods-table th {
+.install-mod-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+}
+
+.install-mod-card {
+  background: color-mix(in srgb, var(--accent-primary, #4a9eff), var(--bg-darkest) 90%);
+  border: 1px solid var(--panel-border);
+  border-radius: 18px;
+  padding: 1rem 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  box-shadow: 0 18px 28px rgba(0, 0, 0, 0.35);
+}
+
+.install-mod-card__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.install-mod-card__title {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.install-mod-card__hint {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  opacity: 0.85;
+}
+
+.install-mod-card__pill {
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  text-transform: uppercase;
+}
+
+.install-mod-card__pill.pill-folder {
+  background: rgba(74, 158, 255, 0.15);
+  color: #9ecbff;
+}
+
+.install-mod-card__pill.pill-pak {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.install-mod-card__badges,
+.install-mod-card__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.install-mod-card__toggles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.35rem 0.75rem;
   padding: 0.75rem;
-  text-align: left;
-  font-weight: bold;
-  color: var(--text-primary);
-  border-bottom: 2px solid var(--panel-border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
-.mods-table td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--panel-border);
+.install-toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.2rem 0.25rem;
+  border-radius: 12px;
+  transition: background 0.2s ease;
 }
 
-.mods-table tbody tr:hover {
-  background: var(--bg-light);
+.install-toggle .heroui-switch-control {
+  margin-right: 0.5rem;
 }
+
+.install-toggle .heroui-switch-label {
+  flex: 1;
+}
+
+.install-toggle__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.install-toggle__label {
+  font-weight: 600;
+  display: block;
+}
+
+.install-toggle__hint {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.install-toggle:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.install-mod-card__tags {
+  border-top: 1px dashed rgba(255, 255, 255, 0.1);
+  padding-top: 0.75rem;
+}
+
+.install-mod-card__footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  justify-content: flex-start;
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  padding-top: 0.75rem;
+}
+
+.install-mod-card__footer .repak-toggle {
+  margin-left: auto;
+}
+
+.repak-toggle.locked {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.install-mod-card__meta {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+
 
 .mod-name-input {
   width: 100%;
   padding: 0.25rem 0.5rem;
-  background: var(--input-bg);
-  border: 1px solid var(--input-border);
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   color: var(--text-primary);
   border-radius: 4px;
 }
 
 .mod-name-input:focus {
   outline: none;
-  border-color: #4a9eff;
+  border-color: var(--accent-primary, #4a9eff);
 }
 
 .mods-table input[type="checkbox"] {

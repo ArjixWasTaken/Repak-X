@@ -462,50 +462,29 @@ button {
   flex-wrap: wrap;
 }
 
-.mod-switch {
+.mod-switch-wrapper {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  cursor: pointer;
-  font-size: 0.85rem;
-  color: var(--text-secondary);
 }
 
-.mod-switch input {
-  display: none;
+.mod-switch.heroui-switch {
+  gap: 0;
 }
 
-.mod-switch-track {
-  width: 46px;
+.mod-switch.heroui-switch .heroui-switch-track {
+  width: 42px;
   height: 24px;
-  border-radius: 999px;
-  background: var(--mod-switch-track);
-  position: relative;
-  transition: background 0.2s ease;
 }
 
-.mod-switch-track::after {
-  content: '';
-  position: absolute;
-  top: 3px;
-  left: 3px;
+.mod-switch.heroui-switch .heroui-switch-thumb {
   width: 18px;
   height: 18px;
-  border-radius: 50%;
-  background: var(--mod-switch-knob);
-  transition: transform 0.2s ease;
+  top: 3px;
+  left: 3px;
 }
 
-.mod-switch.is-on .mod-switch-track {
-  background: var(--accent-primary, #4a9eff);
-}
-
-.mod-switch.is-on .mod-switch-track::after {
-  transform: translateX(22px);
-}
-
-.mod-switch-text {
-  font-weight: 600;
+.mod-switch.heroui-switch.checked .heroui-switch-thumb {
+  transform: translateX(18px);
 }
 
 .hold-delete {
@@ -767,6 +746,19 @@ button:hover:not(:disabled) {
   border-color: var(--accent-secondary);
 }
 
+.btn-modern {
+  background: #2a2a2a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #ffffff;
+  gap: 8px;
+}
+
+.btn-modern:hover:not(:disabled) {
+  background: color-mix(in srgb, #2a2a2a, white 12%);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
 .btn-secondary {
   background: var(--bg-lighter);
   border-color: var(--border-light);
@@ -775,6 +767,12 @@ button:hover:not(:disabled) {
 .btn-danger {
   background: var(--danger);
   border-color: var(--danger);
+  color: #ffffff;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger), white 12%);
+  border-color: color-mix(in srgb, var(--danger), white 12%);
 }
 
 /* Mod Item styles merged into .mod-card */
@@ -1057,33 +1055,6 @@ input[type="text"]:focus {
 
 .error-state {
   color: #f44336;
-}
-
-/* Modern UI Elements */
-.btn-modern {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  background: #2a2a2a;
-  color: white;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.btn-enable {
-  background: #4CAF50;
-}
-
-.btn-disable {
-  background: #f44336;
-}
-
-.btn-danger {
-  background: #f44336;
 }
 
 .modern-checkbox {

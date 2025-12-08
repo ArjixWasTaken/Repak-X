@@ -1,0 +1,178 @@
+.heroui-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+.heroui-switch.disabled {
+  opacity: 0.8;
+  cursor: not-allowed;
+}
+
+.heroui-switch-control {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+
+.heroui-switch-control:focus-visible {
+  outline: 2px solid rgba(74, 158, 255, 0.8);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
+.heroui-switch-track {
+  position: relative;
+  width: 46px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--switch-track-default, var(--panel-border, rgba(255, 255, 255, 0.15)));
+  transition: background 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.heroui-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--switch-thumb, var(--bg-lighter, #ffffff));
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 0.32s cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.heroui-switch.disabled .heroui-switch-track {
+  background: color-mix(in srgb, var(--panel-border, rgba(255, 255, 255, 0.1)), white 10%);
+}
+
+.heroui-switch.disabled .heroui-switch-thumb {
+  background: color-mix(in srgb, var(--bg-lighter, #ffffff), var(--bg-darkest, #0b0f19) 25%);
+  box-shadow: none;
+}
+
+.heroui-switch.checked .heroui-switch-thumb {
+  transform: translateX(20px);
+  box-shadow: 0 3px 16px rgba(0, 0, 0, 0.4);
+}
+
+.heroui-switch-label {
+  font-weight: 500;
+  color: var(--text-primary);
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.heroui-switch.sm .heroui-switch-track {
+  width: 38px;
+  height: 22px;
+}
+
+.heroui-switch.sm .heroui-switch-thumb {
+  width: 16px;
+  height: 16px;
+  top: 3px;
+  left: 3px;
+}
+
+.heroui-switch.sm.checked .heroui-switch-thumb {
+  transform: translateX(16px);
+}
+
+.heroui-switch.lg .heroui-switch-track {
+  width: 56px;
+  height: 32px;
+}
+
+.heroui-switch.lg .heroui-switch-thumb {
+  width: 24px;
+  height: 24px;
+  top: 4px;
+  left: 4px;
+}
+
+.heroui-switch.lg.checked .heroui-switch-thumb {
+  transform: translateX(24px);
+}
+
+.heroui-switch.primary.checked .heroui-switch-track {
+  background: linear-gradient(
+    120deg,
+    var(--accent-primary, #4a9eff),
+    color-mix(in srgb, var(--accent-primary, #4a9eff), white 25%)
+  );
+}
+
+.heroui-switch.secondary.checked .heroui-switch-track {
+  background: linear-gradient(
+    120deg,
+    var(--accent-secondary, #b245ff),
+    color-mix(in srgb, var(--accent-secondary, #b245ff), white 25%)
+  );
+}
+
+.heroui-switch.success.checked .heroui-switch-track {
+  background: linear-gradient(
+    120deg,
+    var(--success, #00c795),
+    color-mix(in srgb, var(--success, #00c795), white 25%)
+  );
+}
+
+.heroui-switch.warning.checked .heroui-switch-track {
+  background: linear-gradient(
+    120deg,
+    var(--warning, #ff8f2f),
+    color-mix(in srgb, var(--warning, #ff8f2f), white 25%)
+  );
+}
+
+.heroui-switch.danger.checked .heroui-switch-track {
+  background: linear-gradient(
+    120deg,
+    var(--danger, #ff5f6d),
+    color-mix(in srgb, var(--danger, #ff5f6d), white 25%)
+  );
+}
+
+.heroui-switch.default.checked .heroui-switch-track {
+  background: linear-gradient(
+    120deg,
+    var(--text-secondary, #7a7a7a),
+    color-mix(in srgb, var(--text-secondary, #7a7a7a), white 30%)
+  );
+}
+
+.heroui-switch.loading .heroui-switch-thumb {
+  opacity: 0.45;
+}
+
+.heroui-switch-spinner {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  border-top-color: var(--switch-spinner, color-mix(in srgb, var(--accent-primary, #4a9eff), white 40%));
+  animation: heroui-switch-spin 0.85s linear infinite;
+}
+
+@keyframes heroui-switch-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
