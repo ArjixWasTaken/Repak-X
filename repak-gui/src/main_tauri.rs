@@ -497,23 +497,54 @@ async fn parse_dropped_files(
         
         // Determine mod type and auto-detection flags
         let (mod_type, auto_fix_mesh, auto_fix_texture, auto_fix_serialize_size) = if path.is_dir() {
-            // First check if directory contains multiple PAK files - if so, process each PAK separately
+            // First check if directory contains multiple PAK files or IoStore sets - if so, process each separately
             use walkdir::WalkDir;
             let mut pak_files = Vec::new();
+            let mut iostore_sets = std::collections::HashMap::<String, (bool, bool, bool)>::new(); // basename -> (pak, utoc, ucas)
             
             for entry in WalkDir::new(&path).max_depth(1).into_iter().filter_map(|e| e.ok()) {
                 let entry_path = entry.path();
-                if let Some(ext) = entry_path.extension().and_then(|s| s.to_str()) {
-                    if ext == "pak" {
-                        pak_files.push(entry_path.to_path_buf());
+                if entry_path.is_file() {
+                    if let Some(ext) = entry_path.extension().and_then(|s| s.to_str()) {
+                        if ext == "pak" {
+                            // Mark PAK file as found
+                            let basename = entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                            iostore_sets.entry(basename.to_string()).or_insert((false, false, false)).0 = true;
+                        } else if ext == "utoc" {
+                            let basename = entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                            iostore_sets.entry(basename.to_string()).or_insert((false, false, false)).1 = true;
+                        } else if ext == "ucas" {
+                            let basename = entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                            iostore_sets.entry(basename.to_string()).or_insert((false, false, false)).2 = true;
+                        }
                     }
                 }
             }
             
-            if pak_files.len() > 1 {
-                // Multiple PAK files - process each separately
-                let _ = window.emit("install_log", format!("[Detection] Found {} PAK files in directory, processing each separately", pak_files.len()));
+            // Separate complete IoStore sets from regular PAK files
+            let mut complete_iostore_sets: Vec<PathBuf> = Vec::new();
+            
+            for (basename, (has_pak, has_utoc, has_ucas)) in iostore_sets.iter() {
+                if *has_pak {
+                    let pak_path = path.join(format!("{}.pak", basename));
+                    if *has_utoc && *has_ucas {
+                        // Complete IoStore set
+                        complete_iostore_sets.push(pak_path);
+                        let _ = window.emit("install_log", format!("[Detection] Found IoStore set: {}", basename));
+                    } else {
+                        // Regular PAK file (missing utoc or ucas)
+                        pak_files.push(pak_path);
+                        let _ = window.emit("install_log", format!("[Detection] Found regular PAK: {}", basename));
+                    }
+                }
+            }
+            
+            // If directory contains multiple mods (PAK files or IoStore sets), process each one separately
+            let total_mods = pak_files.len() + complete_iostore_sets.len();
+            if total_mods > 1 {
+                let _ = window.emit("install_log", format!("[Detection] Found {} mod(s) in directory: {} regular PAKs, {} IoStore sets", total_mods, pak_files.len(), complete_iostore_sets.len()));
                 
+                // Process regular PAK files
                 for pak_file in pak_files {
                     let pak_mods = Box::pin(parse_dropped_files(vec![pak_file.to_string_lossy().to_string()], state.clone(), window.clone())).await?;
                     for pak_mod in pak_mods {
@@ -521,11 +552,55 @@ async fn parse_dropped_files(
                     }
                 }
                 
+                // Process IoStore sets  
+                for iostore_pak in complete_iostore_sets {
+                    let iostore_mods = Box::pin(parse_dropped_files(vec![iostore_pak.to_string_lossy().to_string()], state.clone(), window.clone())).await?;
+                    for iostore_mod in iostore_mods {
+                        mods.push(iostore_mod);
+                    }
+                }
+                
                 return Ok(mods);
             }
             
-            // Single or no PAK files - continue with directory processing
-            ("Directory".to_string(), false, false, false)
+            // Single mod or no mods found - analyze directory contents
+            use crate::utils::collect_files;
+            
+            let mut file_paths = Vec::new();
+            if let Ok(_) = collect_files(&mut file_paths, &path) {
+                let files: Vec<String> = file_paths.iter()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .collect();
+                
+                // Auto-detect mesh and texture files
+                let _ = window.emit("install_log", format!("[Detection] Analyzing directory: {} ({} files)", mod_name, files.len()));
+                
+                let _ = window.emit("install_log", "[Detection] Checking for SkeletalMesh assets...");
+                let has_skeletal_mesh = detect_mesh_files_async(&files).await;
+                let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
+                
+                let _ = window.emit("install_log", "[Detection] Checking for StaticMesh assets...");
+                let has_static_mesh = detect_static_mesh_files_async(&files).await;
+                let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
+                
+                let _ = window.emit("install_log", "[Detection] Checking for Texture assets...");
+                let has_texture = detect_texture_files_async(&files).await;
+                let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
+                
+                // Use detailed characteristics detection for better character/mod type detection
+                use crate::utils::build_characteristics_from_detection;
+                let characteristics = build_characteristics_from_detection(files.clone(), has_skeletal_mesh, has_texture, has_static_mesh);
+                let mod_type = characteristics.mod_type.clone();
+                
+                let summary = format!("[Detection] Results for {}: skeletal={}, static={}, texture={}, type={}", 
+                      mod_name, has_skeletal_mesh, has_static_mesh, has_texture, mod_type);
+                info!("{}", summary);
+                let _ = window.emit("install_log", &summary);
+                
+                (mod_type, has_skeletal_mesh, has_texture, has_static_mesh)
+            } else {
+                ("Directory".to_string(), false, false, false)
+            }
         } else {
             // Get file extension
             let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
@@ -554,21 +629,53 @@ async fn parse_dropped_files(
                     if extract_result.is_ok() {
                         let _ = window.emit("install_log", "[Detection] Archive extracted successfully");
                         
-                        // Look for PAK files in extracted content
+                        // Look for PAK files and IoStore sets in extracted content
                         let mut pak_files_in_archive = Vec::new();
+                        let mut iostore_sets_in_archive = std::collections::HashMap::<String, (bool, bool, bool)>::new();
+                        
                         for entry in WalkDir::new(temp_path).into_iter().filter_map(|e| e.ok()) {
                             let entry_path = entry.path();
-                            if let Some(entry_ext) = entry_path.extension().and_then(|s| s.to_str()) {
-                                if entry_ext == "pak" {
-                                    pak_files_in_archive.push(entry_path.to_path_buf());
+                            if entry_path.is_file() {
+                                if let Some(entry_ext) = entry_path.extension().and_then(|s| s.to_str()) {
+                                    if entry_ext == "pak" {
+                                        // Mark PAK file as found
+                                        let basename = entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                                        iostore_sets_in_archive.entry(basename.to_string()).or_insert((false, false, false)).0 = true;
+                                    } else if entry_ext == "utoc" {
+                                        let basename = entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                                        iostore_sets_in_archive.entry(basename.to_string()).or_insert((false, false, false)).1 = true;
+                                    } else if entry_ext == "ucas" {
+                                        let basename = entry_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                                        iostore_sets_in_archive.entry(basename.to_string()).or_insert((false, false, false)).2 = true;
+                                    }
                                 }
                             }
                         }
                         
-                        if pak_files_in_archive.len() > 1 {
-                            // Multiple PAK files found in archive
-                            let _ = window.emit("install_log", format!("[Detection] Found {} PAK files in archive, processing each separately", pak_files_in_archive.len()));
+                        // Separate complete IoStore sets from regular PAK files
+                        let mut complete_iostore_sets_in_archive: Vec<PathBuf> = Vec::new();
+                        
+                        for (basename, (has_pak, has_utoc, has_ucas)) in iostore_sets_in_archive.iter() {
+                            if *has_pak {
+                                let pak_path = PathBuf::from(temp_path).join(format!("{}.pak", basename));
+                                if *has_utoc && *has_ucas {
+                                    // Complete IoStore set
+                                    complete_iostore_sets_in_archive.push(pak_path);
+                                    let _ = window.emit("install_log", format!("[Detection] Found IoStore set: {}", basename));
+                                } else {
+                                    // Regular PAK file (missing utoc or ucas)
+                                    pak_files_in_archive.push(pak_path);
+                                    let _ = window.emit("install_log", format!("[Detection] Found regular PAK: {}", basename));
+                                }
+                            }
+                        }
+                        
+                        // If archive contains multiple mods (PAK files or IoStore sets), process each one separately
+                        let total_archive_mods = pak_files_in_archive.len() + complete_iostore_sets_in_archive.len();
+                        if total_archive_mods > 1 {
+                            let _ = window.emit("install_log", format!("[Detection] Found {} mod(s) in archive: {} regular PAKs, {} IoStore sets", total_archive_mods, pak_files_in_archive.len(), complete_iostore_sets_in_archive.len()));
                             
+                            // Process regular PAK files
                             for pak_file_path in pak_files_in_archive {
                                 let pak_mods = Box::pin(parse_dropped_files(vec![pak_file_path.to_string_lossy().to_string()], state.clone(), window.clone())).await?;
                                 for pak_mod in pak_mods {
@@ -576,13 +683,25 @@ async fn parse_dropped_files(
                                 }
                             }
                             
+                            // Process IoStore sets
+                            for iostore_pak_path in complete_iostore_sets_in_archive {
+                                let iostore_mods = Box::pin(parse_dropped_files(vec![iostore_pak_path.to_string_lossy().to_string()], state.clone(), window.clone())).await?;
+                                for iostore_mod in iostore_mods {
+                                    mods.push(iostore_mod);
+                                }
+                            }
+                            
                             return Ok(mods);
                         }
                         
-                        // Single PAK file or no PAK files - continue with existing logic
-                        let found_pak = !pak_files_in_archive.is_empty();
+                        // Single mod or no mods - continue with existing logic
+                        let found_pak = !pak_files_in_archive.is_empty() || !complete_iostore_sets_in_archive.is_empty();
                         if found_pak {
-                            let entry_path = &pak_files_in_archive[0];
+                            let entry_path = if !pak_files_in_archive.is_empty() {
+                                &pak_files_in_archive[0]
+                            } else {
+                                &complete_iostore_sets_in_archive[0]
+                            };
                             // Found a single pak file, analyze it
                             if let Ok(file) = File::open(entry_path) {
                                 if let Ok(aes_key) = AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74") {
@@ -606,8 +725,13 @@ async fn parse_dropped_files(
                                         let has_texture = detect_texture_files_async(&uasset_files).await;
                                         let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
                                         
-                                        let summary = format!("[Detection] Archive PAK results: skeletal={}, static={}, texture={}", 
-                                            has_skeletal_mesh, has_static_mesh, has_texture);
+                                        // Use detailed characteristics detection for better character/mod type detection
+                                        use crate::utils::build_characteristics_from_detection;
+                                        let characteristics = build_characteristics_from_detection(files.clone(), has_skeletal_mesh, has_texture, has_static_mesh);
+                                        let mod_type = characteristics.mod_type.clone();
+                                        
+                                        let summary = format!("[Detection] Archive PAK results: skeletal={}, static={}, texture={}, type={}", 
+                                            has_skeletal_mesh, has_static_mesh, has_texture, mod_type);
                                         info!("{}", summary);
                                         let _ = window.emit("install_log", &summary);
                                         
@@ -705,6 +829,55 @@ async fn parse_dropped_files(
                 
                 if is_iostore {
                     let _ = window.emit("install_log", format!("[Detection] IoStore package detected: {}", mod_name));
+                    
+                    // Analyze IoStore PAK content for proper mod type detection
+                    if let Ok(file) = File::open(&path) {
+                        if let Ok(aes_key) = AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74") {
+                            let mut reader = BufReader::new(file);
+                            if let Ok(pak) = PakBuilder::new().key(aes_key.0).reader(&mut reader) {
+                                let files: Vec<String> = pak.files();
+                                
+                                let uasset_files: Vec<String> = files.iter()
+                                    .filter(|f| f.ends_with(".uasset"))
+                                    .cloned()
+                                    .collect();
+                                
+                                let _ = window.emit("install_log", format!("[Detection] Analyzing IoStore PAK: {} files ({} uassets)", files.len(), uasset_files.len()));
+                                
+                                let has_skeletal_mesh = detect_mesh_files_async(&uasset_files).await;
+                                let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
+                                
+                                let has_static_mesh = detect_static_mesh_files_async(&uasset_files).await;
+                                let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
+                                
+                                let has_texture = detect_texture_files_async(&uasset_files).await;
+                                let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
+                                
+                                // Use detailed characteristics detection for better character/mod type detection
+                                use crate::utils::build_characteristics_from_detection;
+                                let characteristics = build_characteristics_from_detection(files.clone(), has_skeletal_mesh, has_texture, has_static_mesh);
+                                let mod_type = characteristics.mod_type.clone();
+                                
+                                let summary = format!("[Detection] IoStore PAK results: skeletal={}, static={}, texture={}, type={}", 
+                                    has_skeletal_mesh, has_static_mesh, has_texture, mod_type);
+                                info!("{}", summary);
+                                let _ = window.emit("install_log", &summary);
+                                
+                                return Ok(vec![InstallableModInfo {
+                                    mod_name,
+                                    mod_type,
+                                    is_dir: false,
+                                    path: path_str,
+                                    auto_fix_mesh: has_skeletal_mesh,
+                                    auto_fix_texture: has_texture,
+                                    auto_fix_serialize_size: has_static_mesh,
+                                    auto_to_repak: false, // IoStore files don't get repacked
+                                }]);
+                            }
+                        }
+                    }
+                    
+                    // Fallback if analysis failed
                     ("IoStore".to_string(), false, false, false)
                 } else {
                     // Read file list for mod type detection only
@@ -730,8 +903,13 @@ async fn parse_dropped_files(
                                 let has_texture = detect_texture_files_async(&uasset_files).await;
                                 let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
                                 
-                                let summary = format!("[Detection] PAK file results: skeletal={}, static={}, texture={}", 
-                                    has_skeletal_mesh, has_static_mesh, has_texture);
+                                // Use detailed characteristics detection for better character/mod type detection
+                                use crate::utils::build_characteristics_from_detection;
+                                let characteristics = build_characteristics_from_detection(files.clone(), has_skeletal_mesh, has_texture, has_static_mesh);
+                                let mod_type = characteristics.mod_type.clone();
+                                
+                                let summary = format!("[Detection] PAK file results: skeletal={}, static={}, texture={}, type={}", 
+                                    has_skeletal_mesh, has_static_mesh, has_texture, mod_type);
                                 info!("{}", summary);
                                 let _ = window.emit("install_log", &summary);
                                 
