@@ -82,3 +82,4 @@ The project is a Tauri (Rust) + React app with C# helper tools. For building fro
 - [rust-u4pak](https://github.com/panzi/rust-u4pak)'s README detailing the pak file layout
 - [jieyouxu](https://github.com/jieyouxu) for serialization implementation of the significantly more complex V11 index
 - [repak](https://github.com/trumank/repak) for the original repak implementation
+- [repak-rivals](https://github.com/natimerry/repak-rivals) by @natimerry, the original fork point and an important early reference
