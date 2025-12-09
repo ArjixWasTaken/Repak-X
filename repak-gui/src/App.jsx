@@ -1173,7 +1173,7 @@ function App() {
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto' }}>
           <button 
             className="btn-settings"
-            title="Launch Marvel Rivals (Coming Soon)"
+            title="Launch Marvel Rivals"
             style={{ 
               background: 'rgba(74, 158, 255, 0.1)', 
               color: '#4a9eff', 
@@ -1183,7 +1183,14 @@ function App() {
               gap: '0.5rem',
               fontWeight: 600
             }}
-            onClick={() => alert('Launch Game feature requires backend configuration. See docs/LAUNCH_GAME_PROPOSAL.md')}
+            onClick={async () => {
+              try {
+                await invoke('launch_game')
+                setStatus('Game launched')
+              } catch (error) {
+                setStatus('Error launching game: ' + error)
+              }
+            }}
           >
             <PlayArrowIcon /> Play
           </button>
