@@ -208,3 +208,107 @@ If you want to skip the launcher even when launching manually through Steam:
 - Automatically skips the launcher when launched through our app
 - Preserves Steam settings for manual launches
 - Provides better error handling and logging
+
+---
+
+## Skip Launcher Patch Toggle (Manual Control)
+
+### ✅ Backend Commands - COMPLETED
+
+Two new Tauri commands have been implemented in `main_tauri.rs`:
+
+1. **`skip_launcher_patch()`** - Toggles the launcher skip setting
+   - Returns `true` if skip launcher is now enabled (launch_record = 0)
+   - Returns `false` if skip launcher is now disabled (launch_record = 6)
+   - Uses delete + recreate method for reliability
+   - Located at lines 1888-1934
+
+2. **`get_skip_launcher_status()`** - Checks current status
+   - Returns `true` if skip launcher is enabled (launch_record = 0)
+   - Returns `false` if skip launcher is disabled (launch_record = 6)
+   - Located at lines 1936-1959
+
+Both commands are registered in the invoke_handler (lines 2941-2942).
+
+### 📝 Frontend Changes Required (`SettingsPanel.jsx`)
+
+The UI already has a "Skip Launcher Patch" button, but the handler needs to be updated:
+
+**Current code (lines 55-68):**
+```javascript
+const handleSkipLauncherPatch = async () => {
+  setIsSkippingLauncher(true);
+  setSkipLauncherStatus('');
+  try {
+    // TODO: Replace with actual backend call once developed
+    await invoke('skip_launcher_patch');
+    setIsLauncherPatchEnabled(true);
+    setSkipLauncherStatus('✓ Launcher patch applied successfully!');
+  } catch (error) {
+    setSkipLauncherStatus(`Error: ${error}`);
+  } finally {
+    setIsSkippingLauncher(false);
+  }
+};
+```
+
+**Update to:**
+```javascript
+const handleSkipLauncherPatch = async () => {
+  setIsSkippingLauncher(true);
+  setSkipLauncherStatus('');
+  try {
+    // Toggle the skip launcher patch
+    const isEnabled = await invoke('skip_launcher_patch');
+    setIsLauncherPatchEnabled(isEnabled);
+    setSkipLauncherStatus(
+      isEnabled 
+        ? '✓ Skip launcher enabled (launch_record = 0)' 
+        : '✓ Skip launcher disabled (launch_record = 6)'
+    );
+  } catch (error) {
+    setSkipLauncherStatus(`Error: ${error}`);
+  } finally {
+    setIsSkippingLauncher(false);
+  }
+};
+```
+
+**Also add this useEffect to check status on mount (add after line 23):**
+```javascript
+// Check skip launcher status on mount
+React.useEffect(() => {
+  const checkStatus = async () => {
+    try {
+      const isEnabled = await invoke('get_skip_launcher_status');
+      setIsLauncherPatchEnabled(isEnabled);
+    } catch (error) {
+      console.error('Failed to check skip launcher status:', error);
+    }
+  };
+  checkStatus();
+}, []);
+```
+
+### How It Works:
+
+1. **Button Click** → Calls `skip_launcher_patch()`
+2. **Backend** → Reads current `launch_record` value
+3. **Toggle** → If "0" → changes to "6", if "6" (or any other value) → changes to "0"
+4. **Delete + Recreate** → Deletes the file and recreates it with new value (more reliable)
+5. **Return Status** → Returns `true` if now enabled, `false` if now disabled
+6. **UI Update** → Button shows current status (Enabled/Disabled with colored indicator)
+
+### Visual Feedback:
+
+- **Green dot + "Enabled"** → launch_record = 0 (launcher will be skipped)
+- **Red dot + "Disabled"** → launch_record = 6 (launcher will show normally)
+- Button text changes to "Applying..." while toggling
+- Status message shows success or error
+
+### Path Fix Applied:
+
+The commands now correctly locate the `launch_record` file:
+- App's `game_path` → Points to `~mods` folder
+- Uses `.parent()` → Goes up to game root (e.g., `Steam\steamapps\common\MarvelRivals\`)
+- Finds `launch_record` → In the correct location next to `MarvelRivals_Launcher.exe`

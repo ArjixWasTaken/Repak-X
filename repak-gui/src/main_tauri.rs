@@ -1740,9 +1740,10 @@ async fn check_game_running() -> Result<bool, String> {
 /// 
 /// This function:
 /// 1. Backs up the current launch_record value
-/// 2. Sets launch_record to "0" to skip the launcher
-/// 3. Launches the game via Steam protocol
-/// 4. Restores the original launch_record value
+/// 2. DELETES the launch_record file
+/// 3. RECREATES it with "0" to skip the launcher
+/// 4. Launches the game via Steam protocol
+/// 5. Restores the original launch_record after game starts
 /// 
 /// This ensures the game launches without the launcher when using our app,
 /// but preserves the user's Steam launch settings for manual launches
@@ -1750,14 +1751,24 @@ async fn check_game_running() -> Result<bool, String> {
 async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), String> {
     use std::process::Command;
     
-    // Get game path
-    let game_path = {
+    // Get game path (this is the ~mods folder inside Paks)
+    let mods_path = {
         let state = state.lock().unwrap();
         state.game_path.clone()
     };
     
-    // Path to launch_record file (next to MarvelRivals_Launcher.exe)
-    let launch_record_path = game_path.join("launch_record");
+    // Go up 5 levels to get the actual game root
+    // ~mods -> Paks -> Content -> Marvel -> MarvelGame -> MarvelRivals (game root)
+    let game_root = mods_path
+        .parent() // Paks
+        .and_then(|p| p.parent()) // Content
+        .and_then(|p| p.parent()) // Marvel
+        .and_then(|p| p.parent()) // MarvelGame
+        .and_then(|p| p.parent()) // MarvelRivals (game root)
+        .ok_or_else(|| "Could not determine game root directory".to_string())?;
+    
+    // Path to launch_record file (in the game root, next to MarvelRivals_Launcher.exe)
+    let launch_record_path = game_root.join("launch_record");
     
     // Backup original value
     let original_value = match std::fs::read_to_string(&launch_record_path) {
@@ -1771,18 +1782,39 @@ async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), Strin
         }
     };
     
-    // Set to "0" to skip launcher
-    if let Err(e) = std::fs::write(&launch_record_path, "0") {
-        error!("Failed to modify launch_record: {}", e);
-        return Err(format!("Failed to modify launch_record: {}", e));
+    // DELETE the launch_record file
+    if launch_record_path.exists() {
+        if let Err(e) = std::fs::remove_file(&launch_record_path) {
+            error!("Failed to delete launch_record: {}", e);
+            return Err(format!("Failed to delete launch_record: {}", e));
+        }
+        info!("Deleted launch_record file");
     }
-    info!("Set launch_record to 0 (skip launcher)");
     
-    // Launch the game via Steam
+    // RECREATE it with "0" to skip launcher
+    if let Err(e) = std::fs::write(&launch_record_path, "0") {
+        error!("Failed to recreate launch_record: {}", e);
+        return Err(format!("Failed to recreate launch_record: {}", e));
+    }
+    info!("Recreated launch_record with value 0 (skip launcher)");
+    
+    // Launch the game via Steam with RUNASINVOKER to skip UAC prompt
     #[cfg(target_os = "windows")]
-    let launch_result = Command::new("cmd")
-        .args(&["/C", "start", "steam://run/2767030"])
-        .spawn();
+    let launch_result = {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        
+        Command::new("cmd")
+            .arg("/C")
+            .arg("set")
+            .arg("__COMPAT_LAYER=RUNASINVOKER")
+            .arg("&&")
+            .arg("start")
+            .arg("")
+            .arg("steam://run/2767030")
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+    };
     
     #[cfg(target_os = "macos")]
     let launch_result = Command::new("open")
@@ -1794,22 +1826,67 @@ async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), Strin
         .arg("steam://run/2767030")
         .spawn();
     
-    // Give Steam a moment to read the file before we restore it
-    std::thread::sleep(std::time::Duration::from_millis(500));
-    
-    // Restore original value
-    if let Some(original) = original_value {
-        if let Err(e) = std::fs::write(&launch_record_path, original.trim()) {
-            warn!("Failed to restore launch_record: {}", e);
-        } else {
-            info!("Restored launch_record to original value");
-        }
-    }
-    
     // Check launch result
     match launch_result {
         Ok(_) => {
-            info!("Successfully launched Marvel Rivals via Steam (launcher skipped)");
+            info!("Successfully launched Marvel Rivals via Steam");
+            
+            // Spawn a background task to restore the launch_record after the game starts
+            let launch_record_path_clone = launch_record_path.clone();
+            std::thread::spawn(move || {
+                use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+                
+                // Wait for the game process to start (up to 30 seconds)
+                let mut waited = 0;
+                let mut game_started = false;
+                
+                while waited < 30000 {
+                    std::thread::sleep(std::time::Duration::from_millis(1000));
+                    waited += 1000;
+                    
+                    // Check if game process is running
+                    let s = System::new_with_specifics(
+                        RefreshKind::new().with_processes(ProcessRefreshKind::new())
+                    );
+                    
+                    let mut found = false;
+                    for (_pid, process) in s.processes() {
+                        let process_name = process.name().to_string_lossy().to_lowercase();
+                        if process_name == "marvel-win64-shipping.exe" {
+                            info!("Game process detected, waiting 2 more seconds before restoring launch_record");
+                            std::thread::sleep(std::time::Duration::from_secs(2));
+                            found = true;
+                            game_started = true;
+                            break;
+                        }
+                    }
+                    
+                    if found {
+                        break;
+                    }
+                }
+                
+                if !game_started {
+                    warn!("Timeout waiting for game to start, restoring launch_record anyway");
+                }
+                
+                // DELETE and RECREATE with original value
+                if let Some(original) = original_value {
+                    if launch_record_path_clone.exists() {
+                        if let Err(e) = std::fs::remove_file(&launch_record_path_clone) {
+                            warn!("Failed to delete launch_record for restoration: {}", e);
+                            return;
+                        }
+                    }
+                    
+                    if let Err(e) = std::fs::write(&launch_record_path_clone, original.trim()) {
+                        warn!("Failed to recreate launch_record with original value: {}", e);
+                    } else {
+                        info!("Restored launch_record to original value (game_started: {})", game_started);
+                    }
+                }
+            });
+            
             Ok(())
         }
         Err(e) => {
@@ -1817,6 +1894,95 @@ async fn launch_game(state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), Strin
             Err(format!("Failed to launch game. Please ensure Steam is installed. Error: {}", e))
         }
     }
+}
+
+/// Toggle the skip launcher patch (manual control)
+/// Returns true if skip launcher is now enabled (0), false if disabled (6)
+#[tauri::command]
+async fn skip_launcher_patch(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
+    // Get game path (this is the ~mods folder inside Paks)
+    let mods_path = {
+        let state = state.lock().unwrap();
+        state.game_path.clone()
+    };
+    
+    // Go up 5 levels to get the actual game root
+    // ~mods -> Paks -> Content -> Marvel -> MarvelGame -> MarvelRivals (game root)
+    let game_root = mods_path
+        .parent() // Paks
+        .and_then(|p| p.parent()) // Content
+        .and_then(|p| p.parent()) // Marvel
+        .and_then(|p| p.parent()) // MarvelGame
+        .and_then(|p| p.parent()) // MarvelRivals (game root)
+        .ok_or_else(|| "Could not determine game root directory".to_string())?;
+    
+    // Path to launch_record file
+    let launch_record_path = game_root.join("launch_record");
+    
+    info!("Mods path: {:?}", mods_path);
+    info!("Game root: {:?}", game_root);
+    info!("Launch record path: {:?}", launch_record_path);
+    
+    // Read current value
+    let current_value = match std::fs::read_to_string(&launch_record_path) {
+        Ok(content) => content.trim().to_string(),
+        Err(_) => {
+            // If file doesn't exist, assume default (6)
+            "6".to_string()
+        }
+    };
+    
+    // Determine new value (toggle between 0 and 6)
+    let new_value = if current_value == "0" {
+        "6" // Disable skip launcher (show launcher)
+    } else {
+        "0" // Enable skip launcher
+    };
+    
+    // Delete and recreate the file with new value
+    if launch_record_path.exists() {
+        std::fs::remove_file(&launch_record_path)
+            .map_err(|e| format!("Failed to delete launch_record: {}", e))?;
+    }
+    
+    std::fs::write(&launch_record_path, &new_value)
+        .map_err(|e| format!("Failed to write launch_record: {}", e))?;
+    
+    let skip_enabled = new_value == "0";
+    info!("Skip launcher patch toggled: {} (value: {})", skip_enabled, new_value);
+    
+    Ok(skip_enabled)
+}
+
+/// Check if skip launcher patch is currently enabled
+#[tauri::command]
+async fn get_skip_launcher_status(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
+    // Get game path (this is the ~mods folder inside Paks)
+    let mods_path = {
+        let state = state.lock().unwrap();
+        state.game_path.clone()
+    };
+    
+    // Go up 5 levels to get the actual game root
+    // ~mods -> Paks -> Content -> Marvel -> MarvelGame -> MarvelRivals (game root)
+    let game_root = mods_path
+        .parent() // Paks
+        .and_then(|p| p.parent()) // Content
+        .and_then(|p| p.parent()) // Marvel
+        .and_then(|p| p.parent()) // MarvelGame
+        .and_then(|p| p.parent()) // MarvelRivals (game root)
+        .ok_or_else(|| "Could not determine game root directory".to_string())?;
+    
+    // Path to launch_record file
+    let launch_record_path = game_root.join("launch_record");
+    
+    // Read current value
+    let current_value = match std::fs::read_to_string(&launch_record_path) {
+        Ok(content) => content.trim().to_string(),
+        Err(_) => "6".to_string(), // Default if file doesn't exist
+    };
+    
+    Ok(current_value == "0")
 }
 
 #[tauri::command]
@@ -2799,6 +2965,8 @@ fn main() {
             toggle_mod,
             check_game_running,
             launch_game,
+            skip_launcher_patch,
+            get_skip_launcher_status,
             get_app_version,
             check_for_updates,
             monitor_game_for_crashes,
