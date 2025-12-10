@@ -2,6 +2,10 @@ import React, { useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { AnimatedThemeToggler } from './ui/AnimatedThemeToggler'
+import Checkbox from './ui/Checkbox'
+import { LuFolderInput } from "react-icons/lu"
+import { RiSparkling2Fill } from "react-icons/ri"
+import { IoMdRefresh, IoIosSkipForward } from "react-icons/io"
 import './SettingsPanel.css'
 
 const ACCENT_COLORS = {
@@ -21,6 +25,39 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
   const [isSkippingLauncher, setIsSkippingLauncher] = useState(false);
   const [skipLauncherStatus, setSkipLauncherStatus] = useState('');
   const [isLauncherPatchEnabled, setIsLauncherPatchEnabled] = useState(false);
+
+  // Check skip launcher status on mount
+  React.useEffect(() => {
+    const checkStatus = async () => {
+      try {
+        const isEnabled = await invoke('get_skip_launcher_status');
+        setIsLauncherPatchEnabled(isEnabled);
+      } catch (error) {
+        console.error('Failed to check skip launcher status:', error);
+      }
+    };
+    checkStatus();
+  }, []);
+
+  // Clear skip launcher status after 5 seconds
+  React.useEffect(() => {
+    if (skipLauncherStatus) {
+      const timer = setTimeout(() => {
+        setSkipLauncherStatus('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [skipLauncherStatus]);
+
+  // Clear usmap status after 5 seconds
+  React.useEffect(() => {
+    if (usmapStatus) {
+      const timer = setTimeout(() => {
+        setUsmapStatus('');
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [usmapStatus]);
 
   const handleSave = () => {
     onSave({
@@ -56,10 +93,14 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
     setIsSkippingLauncher(true);
     setSkipLauncherStatus('');
     try {
-      // TODO: Replace with actual backend call once developed
-      await invoke('skip_launcher_patch');
-      setIsLauncherPatchEnabled(true);
-      setSkipLauncherStatus('✓ Launcher patch applied successfully!');
+      // Toggle the skip launcher patch
+      const isEnabled = await invoke('skip_launcher_patch');
+      setIsLauncherPatchEnabled(isEnabled);
+      setSkipLauncherStatus(
+        isEnabled
+          ? '✓ Skip launcher enabled (launch_record = 0)'
+          : '✓ Skip launcher disabled (launch_record = 6)'
+      );
     } catch (error) {
       setSkipLauncherStatus(`Error: ${error}`);
     } finally {
@@ -96,92 +137,72 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
           <h2>Settings</h2>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
-        
+
         <div className="modal-body">
           <div className="setting-section">
             <h3>Game Mods Path</h3>
             <div className="setting-group">
-              <label>Your game's mods folder path.</label>
-              <input
-                type="text"
-                value={gamePath || ''}
-                readOnly
-                placeholder="No game path set"
-                className="path-input"
-              />
-            </div>
-            <div className="setting-group" style={{ display: 'flex', gap: '0.5rem' }}>
-              <button onClick={onAutoDetectGamePath} disabled={isGamePathLoading}>
-                {isGamePathLoading ? 'Detecting…' : 'Auto Detect'}
-              </button>
-              <button onClick={onBrowseGamePath}>
-                Browse
-              </button>
+              <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>Your game's mods folder path.</p>
+              <div className="combined-input-group">
+                <input
+                  type="text"
+                  value={gamePath || ''}
+                  readOnly
+                  placeholder="No game path set"
+                  className="integrated-input"
+                />
+                <div className="input-actions">
+                  <button
+                    onClick={onAutoDetectGamePath}
+                    disabled={isGamePathLoading}
+                    className="action-btn"
+                    title="Auto Detect Game Path"
+                  >
+                    <RiSparkling2Fill />
+                    {isGamePathLoading ? 'Detecting…' : 'Auto Detect'}
+                  </button>
+                  <button
+                    onClick={onBrowseGamePath}
+                    className="action-btn icon-only"
+                    title="Browse Folder"
+                  >
+                    <LuFolderInput size={16} />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
           <div className="setting-section">
-            <h3>Game Settings</h3>
+            <h3>USMAP Mapping File</h3>
             <div className="setting-group">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={hideSuffix}
-                  onChange={(e) => setHideSuffix(e.target.checked)}
-                />
-                Hide file suffix in mod names
-              </label>
-            </div>
-            <div className="setting-group">
-              <label>Global USMAP Path:</label>
-              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+              <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>Global .usmap file path for asset mapping.</p>
+              <div className="combined-input-group">
                 <input
                   type="text"
                   value={globalUsmap}
                   onChange={(e) => setGlobalUsmap(e.target.value)}
                   placeholder="Path to global USMAP file..."
-                  className="path-input"
+                  className="integrated-input"
                   readOnly
                 />
-                <button onClick={handleBrowseUsmap}>
-                  Browse
-                </button>
+                <div className="input-actions">
+                  <button
+                    onClick={handleBrowseUsmap}
+                    className="action-btn icon-only"
+                    title="Select USmap File"
+                  >
+                    <LuFolderInput size={16} />
+                  </button>
+                </div>
               </div>
               {usmapStatus && (
-                <p style={{ 
-                  fontSize: '0.85rem', 
+                <p style={{
+                  fontSize: '0.85rem',
                   marginTop: '0.5rem',
                   color: usmapStatus.startsWith('✓') ? '#4CAF50' : '#ff5252'
                 }}>
                   {usmapStatus}
-                </p>
-              )}
-            </div>
-          </div>
-
-          <div className="setting-section">
-            <h3>Character Data</h3>
-            <div className="setting-group">
-              <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                Update the character database from GitHub to support new heroes and skins.
-              </p>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button onClick={handleUpdateCharacterData} disabled={isUpdatingChars}>
-                  {isUpdatingChars ? 'Updating...' : 'Update from GitHub'}
-                </button>
-                {isUpdatingChars && (
-                  <button onClick={handleCancelUpdate} className="btn-secondary" style={{ borderColor: '#ff5252', color: '#ff5252' }}>
-                    Cancel
-                  </button>
-                )}
-              </div>
-              {charUpdateStatus && (
-                <p style={{ 
-                  fontSize: '0.85rem', 
-                  marginTop: '0.5rem',
-                  color: charUpdateStatus.includes('Error') || charUpdateStatus.includes('Cancelled') ? '#ff5252' : '#4CAF50'
-                }}>
-                  {charUpdateStatus}
                 </p>
               )}
             </div>
@@ -194,12 +215,17 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
                 Sets <b>launch_record</b> value to 0.
               </p>
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                <button onClick={handleSkipLauncherPatch} disabled={isSkippingLauncher}>
+                <button
+                  onClick={handleSkipLauncherPatch}
+                  disabled={isSkippingLauncher}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <IoIosSkipForward size={16} />
                   {isSkippingLauncher ? 'Applying...' : 'Skip Launcher Patch'}
                 </button>
-                <span style={{ 
-                  display: 'inline-flex', 
-                  alignItems: 'center', 
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
                   gap: '0.4rem',
                   fontSize: '0.85rem',
                   fontWeight: 600,
@@ -215,8 +241,8 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
                 </span>
               </div>
               {skipLauncherStatus && (
-                <p style={{ 
-                  fontSize: '0.85rem', 
+                <p style={{
+                  fontSize: '0.85rem',
                   marginTop: '0.5rem',
                   color: skipLauncherStatus.includes('Error') ? '#ff5252' : '#4CAF50'
                 }}>
@@ -227,37 +253,85 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
           </div>
 
           <div className="setting-section">
-            <h3>Theme</h3>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <AnimatedThemeToggler theme={theme} setTheme={setTheme} />
-              <span style={{ fontSize: '0.9rem', opacity: 0.8 }}>
-                {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
-              </span>
+            <h3>Mods View Settings</h3>
+            <div className="setting-group">
+              <Checkbox
+                checked={hideSuffix}
+                onChange={(checked) => setHideSuffix(checked)}
+              >
+                <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Hide file suffix in mod names</span>
+              </Checkbox>
             </div>
           </div>
 
           <div className="setting-section">
-            <h3>Accent Color</h3>
-            <div className="color-options">
-              {Object.entries(ACCENT_COLORS).map(([name, color]) => (
+            <h3>Character Database</h3>
+            <div className="setting-group">
+              <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                Update the character database from GitHub to support new heroes and skins.
+              </p>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
                 <button
-                  key={name}
-                  className={`color-option ${accentColor === color ? 'selected' : ''}`}
-                  style={{ backgroundColor: color }}
-                  onClick={() => setAccentColor(color)}
-                  title={name.charAt(0).toUpperCase() + name.slice(1)}
-                />
-              ))}
+                  onClick={handleUpdateCharacterData}
+                  disabled={isUpdatingChars}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <IoMdRefresh size={18} className={isUpdatingChars ? 'spin-animation' : ''} />
+                  {isUpdatingChars ? 'Updating...' : 'Update Heroes Database'}
+                </button>
+              </div>
+              {charUpdateStatus && (
+                <p style={{
+                  fontSize: '0.85rem',
+                  marginTop: '0.5rem',
+                  color: charUpdateStatus.includes('Error') || charUpdateStatus.includes('Cancelled') ? '#ff5252' : '#4CAF50'
+                }}>
+                  {charUpdateStatus}
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="setting-section">
+            <h3>Theme</h3>
+            <div className="setting-group">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                <AnimatedThemeToggler theme={theme} setTheme={setTheme} />
+                <span style={{ fontSize: '0.9rem', opacity: 0.8 }}>
+                  {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
+                </span>
+              </div>
+
+              <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem', opacity: 0.9 }}>Accent Color</label>
+              <div className="color-options">
+                {Object.entries(ACCENT_COLORS).map(([name, color]) => (
+                  <button
+                    key={name}
+                    className={`color-option ${accentColor === color ? 'selected' : ''}`}
+                    style={{ backgroundColor: color }}
+                    onClick={() => setAccentColor(color)}
+                    title={name.charAt(0).toUpperCase() + name.slice(1)}
+                  />
+                ))}
+              </div>
             </div>
           </div>
         </div>
-        
-        <div className="modal-footer">
-          <button onClick={handleSave} className="btn-primary">
-            Save
-          </button>
-          <button onClick={onClose} className="btn-secondary">
+
+        <div className="modal-footer" style={{ gap: '0.5rem' }}>
+          <button
+            onClick={onClose}
+            className="btn-secondary"
+            style={{ padding: '0.4rem 1rem', fontSize: '0.9rem', minWidth: 'auto' }}
+          >
             Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="btn-primary"
+            style={{ padding: '0.4rem 1rem', fontSize: '0.9rem', minWidth: 'auto' }}
+          >
+            Save
           </button>
         </div>
       </div>
