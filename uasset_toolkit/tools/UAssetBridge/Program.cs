@@ -313,12 +313,14 @@ public class Program
         if (filePaths == null || filePaths.Count == 0)
             return new UAssetResponse { Success = false, Message = "file_paths required" };
 
-        string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
-        Usmap? mappings = null;
-        if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
+        try
         {
-            mappings = new Usmap(usmapPath);
-        }
+            string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
+            Usmap? mappings = null;
+            if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
+            {
+                mappings = new Usmap(usmapPath);
+            }
 
         // DEBUG: Log info about SK_ files to find out actual class names
         var debugInfo = new List<string>();
@@ -444,12 +446,22 @@ public class Program
             }
         });
 
-        return new UAssetResponse
+            return new UAssetResponse
+            {
+                Success = true,
+                Message = foundMatch ? $"Found {targetClass} in batch" : $"No {targetClass} found in batch",
+                Data = foundMatch
+            };
+        }
+        catch (Exception ex)
         {
-            Success = true,
-            Message = foundMatch ? $"Found {targetClass} in batch" : $"No {targetClass} found in batch",
-            Data = foundMatch
-        };
+            return new UAssetResponse
+            {
+                Success = false,
+                Message = $"Batch detection error: {ex.Message}\nStackTrace: {ex.StackTrace}",
+                Data = false
+            };
+        }
     }
 
     private static UAssetResponse BatchDetectTexture(List<string>? filePaths)
@@ -457,8 +469,10 @@ public class Program
         if (filePaths == null || filePaths.Count == 0)
             return new UAssetResponse { Success = false, Message = "file_paths required" };
 
-        // Get usmap path from environment
-        string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
+        try
+        {
+            // Get usmap path from environment
+            string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
 
         // Process files in parallel for maximum speed
         // Only return true if texture needs MipGen fixing (not already NoMipmaps)
@@ -481,12 +495,22 @@ public class Program
             }
         });
 
-        return new UAssetResponse
+            return new UAssetResponse
+            {
+                Success = true,
+                Message = foundMatch ? "Found Texture needing MipGen fix in batch" : "No Texture needing fix found in batch",
+                Data = foundMatch
+            };
+        }
+        catch (Exception ex)
         {
-            Success = true,
-            Message = foundMatch ? "Found Texture needing MipGen fix in batch" : "No Texture needing fix found in batch",
-            Data = foundMatch
-        };
+            return new UAssetResponse
+            {
+                Success = false,
+                Message = $"Batch texture detection error: {ex.Message}\nStackTrace: {ex.StackTrace}",
+                Data = false
+            };
+        }
     }
 
     private static UAssetResponse BatchDetectBlueprint(List<string>? filePaths)
@@ -494,14 +518,16 @@ public class Program
         if (filePaths == null || filePaths.Count == 0)
             return new UAssetResponse { Success = false, Message = "file_paths required" };
 
-        // Get usmap path from environment
-        string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
-        Usmap? mappings = null;
-        
-        if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
+        try
         {
-            try
+            // Get usmap path from environment
+            string? usmapPath = Environment.GetEnvironmentVariable("USMAP_PATH");
+            Usmap? mappings = null;
+            
+            if (!string.IsNullOrEmpty(usmapPath) && File.Exists(usmapPath))
             {
+                try
+                {
                 mappings = new Usmap(usmapPath);
             }
             catch { }
@@ -533,12 +559,22 @@ public class Program
             }
         });
 
-        return new UAssetResponse
+            return new UAssetResponse
+            {
+                Success = true,
+                Message = foundMatch ? "Found Blueprint in batch" : "No Blueprint found in batch",
+                Data = foundMatch
+            };
+        }
+        catch (Exception ex)
         {
-            Success = true,
-            Message = foundMatch ? "Found Blueprint in batch" : "No Blueprint found in batch",
-            Data = foundMatch
-        };
+            return new UAssetResponse
+            {
+                Success = false,
+                Message = $"Batch blueprint detection error: {ex.Message}\nStackTrace: {ex.StackTrace}",
+                Data = false
+            };
+        }
     }
 
     private static bool IsBlueprint(UAsset asset)

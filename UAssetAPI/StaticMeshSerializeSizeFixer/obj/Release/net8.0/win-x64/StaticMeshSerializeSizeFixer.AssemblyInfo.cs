@@ -12,11 +12,11 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("StaticMeshSerializeSizeFixer")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("2.6.4.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.6.4+b7efff02d55c867fdb656c684531fed585554420")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+29fc893b36a23dd1756988b9336fc6cbd9224590")]
 [assembly: System.Reflection.AssemblyProductAttribute("StaticMeshSerializeSizeFixer")]
 [assembly: System.Reflection.AssemblyTitleAttribute("StaticMeshSerializeSizeFixer")]
-[assembly: System.Reflection.AssemblyVersionAttribute("2.6.4.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
 
 // Von der MSBuild WriteCodeFragment-Klasse generiert.
 

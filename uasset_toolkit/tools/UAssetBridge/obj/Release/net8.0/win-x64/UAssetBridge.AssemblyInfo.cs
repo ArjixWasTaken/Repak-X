@@ -12,11 +12,11 @@ using System.Reflection;
 
 [assembly: System.Reflection.AssemblyCompanyAttribute("UAssetBridge")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
-[assembly: System.Reflection.AssemblyFileVersionAttribute("2.6.4.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("2.6.4+b7efff02d55c867fdb656c684531fed585554420")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+c2f63ca97a45a855775a4b0705ba8f7a2ea7afc4")]
 [assembly: System.Reflection.AssemblyProductAttribute("UAssetBridge")]
 [assembly: System.Reflection.AssemblyTitleAttribute("UAssetBridge")]
-[assembly: System.Reflection.AssemblyVersionAttribute("2.6.4.0")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
 
 // Von der MSBuild WriteCodeFragment-Klasse generiert.
 
