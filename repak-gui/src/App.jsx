@@ -38,7 +38,7 @@ import './App.css'
 import './styles/theme.css'
 import './styles/Badges.css'
 import './styles/Fonts.css'
-import logo from './assets/RepakIcon-x256.png'
+import logo from './assets/app-icons/RepakIcon-x256.png'
 
 const toTagArray = (tags) => Array.isArray(tags) ? tags : (tags ? [tags] : [])
 
@@ -1175,7 +1175,7 @@ function App() {
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto' }}>
           <button
             className="btn-settings"
-            title="Launch Marvel Rivals"
+            title="Launch Rivals"
             style={{
               background: launchSuccess ? 'rgba(76, 175, 80, 0.15)' : 'rgba(74, 158, 255, 0.1)',
               color: launchSuccess ? '#4CAF50' : '#4a9eff',

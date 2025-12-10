@@ -5,6 +5,8 @@ import characterData from '../data/character_data.json'
 import FileTree from './FileTree'
 import './ModDetailsPanel.css'
 
+const heroImages = import.meta.glob('../assets/hero/*.png', { eager: true })
+
 export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
   const [details, setDetails] = useState(initialDetails || null)
   const [loading, setLoading] = useState(!initialDetails)
@@ -35,12 +37,12 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
 
   const additionalBadges = useMemo(() => {
     if (!details) return []
-    
+
     // Use explicit field if available and not empty
     if (details.additional_categories && details.additional_categories.length > 0) {
       return details.additional_categories
     }
-    
+
     // Fallback: Parse from mod_type string
     // Format: "Name - Category [Add1, Add2]"
     if (details.mod_type) {
@@ -49,7 +51,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
         return match[1].split(',').map(s => s.trim())
       }
     }
-    
+
     return []
   }, [details])
 
@@ -58,7 +60,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
       setLoading(true)
       setError(null)
       console.log('Loading details for:', mod.path)
-      const modDetails = await invoke('get_mod_details', { 
+      const modDetails = await invoke('get_mod_details', {
         modPath: mod.path
       })
       console.log('Received details:', modDetails)
@@ -83,7 +85,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
       <div className="details-header">
         <h2>{cleanName}</h2>
       </div>
-      
+
       <div className="details-body">
         {loading ? (
           <div className="loading-state">Loading mod details...</div>
@@ -100,21 +102,27 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
               <div className="badges-container">
                 {details.character_name && (
                   <div className="character-badge" title="Character">
+                    {getHeroImage(details.character_name) && (
+                      <img src={getHeroImage(details.character_name)} alt="" />
+                    )}
                     {details.character_name}
                   </div>
                 )}
                 {details.mod_type.startsWith('Multiple Heroes') && (
-                  <Tooltip 
+                  <Tooltip
                     title={
                       <div className="heroes-list">
                         {heroesList.map(name => (
                           <span key={name} className="tag hero-tag">
+                            {getHeroImage(name) && (
+                              <img src={getHeroImage(name)} alt="" />
+                            )}
                             {name}
                           </span>
                         ))}
                       </div>
-                    } 
-                    arrow 
+                    }
+                    arrow
                     placement="bottom"
                     slotProps={{
                       tooltip: {
@@ -135,7 +143,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
                 </div>
                 {/* Render additional categories (Blueprint, Text) */}
                 {additionalBadges.map(cat => (
-                  <div 
+                  <div
                     key={cat}
                     className={`additional-badge ${cat.toLowerCase()}-badge`}
                     title={`Contains ${cat}`}
@@ -166,7 +174,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
                 </div>
               )}
             </div>
-            
+
             {mod.custom_tags && mod.custom_tags.length > 0 && (
               <div className="detail-section">
                 <h3>Tags</h3>
@@ -210,25 +218,25 @@ function formatFileSize(bytes) {
 
 function detectHeroes(files) {
   const heroIds = new Set()
-  
+
   // Regex patterns matching backend logic
   const pathRegex = /(?:Characters|Hero_ST|Hero)\/(\d{4})/
   const filenameRegex = /[_/](10[1-6]\d)(\d{3})/
-  
+
   files.forEach(file => {
     // Check path
     const pathMatch = file.match(pathRegex)
     if (pathMatch) {
       heroIds.add(pathMatch[1])
     }
-    
+
     // Check filename
     const filenameMatch = file.match(filenameRegex)
     if (filenameMatch) {
       heroIds.add(filenameMatch[1])
     }
   })
-  
+
   // Map IDs to names
   const heroNames = new Set()
   heroIds.forEach(id => {
@@ -237,6 +245,25 @@ function detectHeroes(files) {
       heroNames.add(char.name)
     }
   })
-  
+
   return Array.from(heroNames).sort()
+}
+
+function getHeroImage(heroName) {
+  if (!heroName) return null
+
+  // Check for ID at start (e.g. "1025XXX" -> 1025)
+  const idMatch = heroName.match(/^(10\d{2})/)
+  if (idMatch) {
+    const id = idMatch[1]
+    const key = `../assets/hero/${id}.png`
+    if (heroImages[key]) return heroImages[key].default
+  }
+
+  // Find by name (partial match)
+  const char = characterData.find(c => heroName.includes(c.name))
+  if (!char) return null
+
+  const key = `../assets/hero/${char.id}.png`
+  return heroImages[key]?.default
 }

@@ -82,11 +82,19 @@
 .hero-tag {
   background: rgba(74, 158, 255, 0.15);
   border: 1px solid rgba(74, 158, 255, 0.3);
-  color: var(--text-primary);
+  color: white !important;
   font-size: 0.85em;
-  padding: 4px 8px;
+  padding: 4px 8px 4px 6px;
   border-radius: 4px;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hero-tag img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
 }
 
 .character-badge.multi-hero {

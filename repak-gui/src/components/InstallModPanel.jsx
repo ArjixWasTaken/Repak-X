@@ -1,6 +1,9 @@
 import { useState, useEffect } from 'react'
 import Switch from './ui/Switch'
 import './InstallModPanel.css'
+import characterData from '../data/character_data.json'
+
+const heroImages = import.meta.glob('../assets/hero/*.png', { eager: true })
 
 const hasCookedAssets = (mod = {}) => {
   if (!mod?.is_dir) return false
@@ -30,16 +33,16 @@ const buildInitialSettings = (mods = []) => {
 
 function parseModType(modType) {
   if (!modType) return { character: null, category: 'Unknown', additional: [] }
-  
+
   // Extract additional categories
   const bracketMatch = modType.match(/\[(.*?)\]/)
   const additional = bracketMatch ? bracketMatch[1].split(',').map(s => s.trim()) : []
-  
+
   // Clean base string
   let base = modType.replace(/\[.*?\]/, '').trim()
   let character = null
   let category = base
-  
+
   // Split Character - Category
   if (base.includes(' - ')) {
     const parts = base.split(' - ')
@@ -48,7 +51,7 @@ function parseModType(modType) {
       character = parts.join(' - ')
     }
   }
-  
+
   return { character, category, additional }
 }
 
@@ -160,6 +163,7 @@ export default function InstallModPanel({ mods, allTags, onCreateTag, onInstall,
                     <div className="install-mod-card__badges">
                       {character && (
                         <span className={`character-badge ${character.startsWith('Multiple Heroes') ? 'multi-hero' : ''}`}>
+                          {getHeroImage(character) && <img src={getHeroImage(character)} alt="" />}
                           {character}
                         </span>
                       )}
@@ -293,4 +297,23 @@ export default function InstallModPanel({ mods, allTags, onCreateTag, onInstall,
       </div>
     </div>
   )
+}
+
+function getHeroImage(heroName) {
+  if (!heroName) return null
+
+  // Check for ID at start (e.g. "1025XXX" -> 1025)
+  const idMatch = heroName.match(/^(10\d{2})/)
+  if (idMatch) {
+    const id = idMatch[1]
+    const key = `../assets/hero/${id}.png`
+    if (heroImages[key]) return heroImages[key].default
+  }
+
+  // Find by name (partial match)
+  const char = characterData.find(c => heroName.includes(c.name))
+  if (!char) return null
+
+  const key = `../assets/hero/${char.id}.png`
+  return heroImages[key]?.default
 }
