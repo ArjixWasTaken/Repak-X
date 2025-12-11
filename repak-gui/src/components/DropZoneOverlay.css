@@ -1,0 +1,231 @@
+/* Drop Zone Overlay */
+.dropzone-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 99999;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+    pointer-events: auto;
+}
+
+.dropzone-overlay * {
+    pointer-events: auto;
+}
+
+.dropzone-container {
+    display: flex;
+    gap: 2rem;
+    width: 100%;
+    max-width: 1200px;
+    height: 80vh;
+    max-height: 700px;
+}
+
+/* Zone Cards */
+.dropzone-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem;
+    background: rgba(30, 30, 35, 0.9);
+    border: 2px dashed rgba(255, 255, 255, 0.2);
+    border-radius: 16px;
+    transition: all 0.25s ease;
+    overflow: hidden;
+}
+
+.dropzone-card:hover,
+.dropzone-card.active {
+    border-color: var(--accent-primary, #4a9eff);
+    background: rgba(40, 40, 50, 0.95);
+    box-shadow:
+        0 0 40px rgba(74, 158, 255, 0.15),
+        inset 0 0 60px rgba(74, 158, 255, 0.05);
+}
+
+.dropzone-card.active {
+    border-style: solid;
+    transform: scale(1.02);
+}
+
+/* Zone Icon */
+.zone-icon {
+    font-size: 4rem;
+    color: var(--accent-primary, #4a9eff);
+    margin-bottom: 1rem;
+    opacity: 0.8;
+    transition: all 0.25s ease;
+}
+
+.dropzone-card.active .zone-icon {
+    opacity: 1;
+    transform: scale(1.1);
+}
+
+/* Zone Text */
+.dropzone-card h2 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+    color: var(--text-primary, #ffffff);
+}
+
+.dropzone-card p {
+    font-size: 0.9rem;
+    color: var(--text-secondary, #aaaaaa);
+    text-align: center;
+    margin: 0 0 1rem 0;
+    max-width: 280px;
+}
+
+.zone-hint {
+    font-size: 0.75rem;
+    color: var(--text-secondary, #888888);
+    opacity: 0.7;
+    padding: 0.5rem 1rem;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 20px;
+}
+
+/* Install Zone Specific */
+.install-zone {
+    justify-content: center;
+}
+
+/* Organize Zone Specific */
+.organize-zone {
+    justify-content: flex-start;
+}
+
+.organize-zone .zone-icon,
+.organize-zone h2,
+.organize-zone p {
+    flex-shrink: 0;
+}
+
+/* Folder Tree Container */
+.folder-tree-container {
+    flex: 1;
+    width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 8px;
+    padding: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.drop-folder-tree {
+    margin-left: 0.5rem;
+    border-left: 1px solid rgba(255, 255, 255, 0.1);
+    padding-left: 0.5rem;
+}
+
+/* Folder Items */
+.drop-folder-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-size: 0.85rem;
+    color: var(--text-primary, #ffffff);
+}
+
+.drop-folder-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.drop-folder-item.selected {
+    background: rgba(74, 158, 255, 0.25);
+    color: var(--accent-primary, #4a9eff);
+}
+
+.drop-folder-item.virtual {
+    opacity: 0.7;
+}
+
+.drop-folder-item .folder-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    font-size: 0.8rem;
+    opacity: 0.6;
+}
+
+.drop-folder-item .folder-icon {
+    font-size: 1rem;
+    color: var(--accent-primary, #4a9eff);
+}
+
+.drop-folder-item .folder-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.root-item {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+/* Selected Folder Hint */
+.selected-folder-hint {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: rgba(74, 158, 255, 0.15);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--accent-primary, #4a9eff);
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.selected-folder-hint strong {
+    color: #ffffff;
+}
+
+/* Scrollbar */
+.folder-tree-container::-webkit-scrollbar {
+    width: 6px;
+}
+
+.folder-tree-container::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.folder-tree-container::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.folder-tree-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .dropzone-container {
+        flex-direction: column;
+        gap: 1rem;
+    }
+
+    .dropzone-card {
+        padding: 1.5rem;
+    }
+
+    .zone-icon {
+        font-size: 3rem;
+    }
+}

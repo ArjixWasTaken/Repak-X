@@ -5,10 +5,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Script is in src/assets/hero/script
-// Images are in src/assets/hero (one level up)
 const heroDir = path.join(__dirname, '..');
-// IDs file is in src/assets/hero/script (same directory as script)
 const idsFile = path.join(__dirname, 'herobase_ids.txt');
 
 // Additional mappings for names that don't directly match after normalization
@@ -43,7 +40,7 @@ try {
 
     const id = parts[0].trim();
     const rawName = parts[1].trim();
-    
+
     // Normalize: lower case, remove non-alphanumeric chars
     // e.g. "Cloak & Dagger" -> "cloakdagger"
     let normalized = rawName.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -53,7 +50,7 @@ try {
     if (aliases[normalized]) {
       filenameStr = aliases[normalized];
     }
-    
+
     const filename = `${filenameStr}.png`;
     const oldPath = path.join(heroDir, filename);
     const newPath = path.join(heroDir, `${id}.png`);

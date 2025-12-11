@@ -33,6 +33,7 @@ import FileTree from './components/FileTree'
 import FolderTree from './components/FolderTree'
 import ContextMenu from './components/ContextMenu'
 import LogDrawer from './components/LogDrawer'
+import DropZoneOverlay from './components/DropZoneOverlay'
 import { AuroraText } from './components/ui/AuroraText'
 import Switch from './components/ui/Switch'
 import NumberInput from './components/ui/NumberInput'
@@ -173,6 +174,9 @@ function App() {
   const [clashes, setClashes] = useState([])
   const [showClashPanel, setShowClashPanel] = useState(false)
   const [launchSuccess, setLaunchSuccess] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [dropTargetFolder, setDropTargetFolder] = useState(null)
+  const dropTargetFolderRef = useRef(null)
 
   const handleCheckClashes = async () => {
     try {
@@ -280,8 +284,37 @@ function App() {
           return
         }
         console.log('Parsed mods:', modsData)
-        setModsToInstall(modsData)
-        setShowInstallPanel(true)
+
+        // Check if we should quick-organize to a folder (using ref for current value in closure)
+        const targetFolder = dropTargetFolderRef.current
+        if (targetFolder) {
+          // Quick organize: directly install to the folder without showing install panel
+          console.log('Quick organizing to folder:', targetFolder)
+          setStatus(`Quick installing ${modsData.length} mod(s) to ${targetFolder}...`)
+
+          // Prepare mods with folder assignment for direct install
+          const modsWithFolder = modsData.map(mod => ({
+            ...mod,
+            targetFolder: targetFolder
+          }))
+
+          try {
+            // Install directly
+            await invoke('install_mods', { mods: modsWithFolder })
+            setStatus(`Installed ${modsData.length} mod(s) to ${targetFolder}!`)
+            await loadMods()
+            await loadFolders()
+          } catch (installError) {
+            console.error('Quick install error:', installError)
+            setStatus(`Error installing mods: ${installError}`)
+          }
+
+          setDropTargetFolder(null) // Reset for next drop
+        } else {
+          // Normal drop: show install panel
+          setModsToInstall(modsData)
+          setShowInstallPanel(true)
+        }
       } catch (error) {
         console.error('Parse error:', error)
         setStatus(`Error parsing dropped items: ${error}`)
@@ -291,12 +324,14 @@ function App() {
     // Listen for Tauri drag-drop event
     const unlistenDragDrop = listen('tauri://drag-drop', (event) => {
       const files = event.payload.paths || event.payload
+      setIsDragging(false)
       handleFileDrop(files)
     })
 
     // Listen for Tauri file-drop event
     const unlistenFileDrop = listen('tauri://file-drop', (event) => {
       const files = event.payload.paths || event.payload
+      setIsDragging(false)
       handleFileDrop(files)
     })
 
@@ -323,27 +358,37 @@ function App() {
     }
   }, [])
 
+  // Tauri drag hover detection - use Tauri's events instead of browser events
   useEffect(() => {
-    const handleDragEnter = (e) => {
-      e.preventDefault()
+    // Listen for Tauri drag-enter event (when files first enter the window)
+    const unlistenDragEnter = listen('tauri://drag-enter', () => {
+      console.log('Tauri drag-enter detected')
       setIsDragging(true)
-    }
+    })
 
-    const handleDragLeave = (e) => {
-      e.preventDefault()
+    // Listen for Tauri drag-leave event (when files leave the window)
+    const unlistenDragLeave = listen('tauri://drag-leave', () => {
+      console.log('Tauri drag-leave detected')
       setIsDragging(false)
-    }
+    })
 
-    document.addEventListener('dragenter', handleDragEnter)
-    document.addEventListener('dragleave', handleDragLeave)
-    document.addEventListener('drop', () => setIsDragging(false))
+    // Also reset on drag-cancelled
+    const unlistenDragCancelled = listen('tauri://drag-cancelled', () => {
+      console.log('Tauri drag-cancelled detected')
+      setIsDragging(false)
+    })
 
     return () => {
-      document.removeEventListener('dragenter', handleDragEnter)
-      document.removeEventListener('dragleave', handleDragLeave)
-      document.removeEventListener('drop', () => setIsDragging(false))
+      unlistenDragEnter.then(f => f())
+      unlistenDragLeave.then(f => f())
+      unlistenDragCancelled.then(f => f())
     }
   }, [])
+
+  // Keep the ref in sync with state for access in event listener closures
+  useEffect(() => {
+    dropTargetFolderRef.current = dropTargetFolder
+  }, [dropTargetFolder])
 
   const loadInitialData = async () => {
     try {
@@ -1048,6 +1093,22 @@ function App() {
           selectedMods={selectedMods}
         />
       )}
+
+      {/* Drop Zone Overlay */}
+      <DropZoneOverlay
+        isVisible={isDragging}
+        folders={folders}
+        onInstallDrop={() => {
+          // Just signals intent - actual files come from Tauri event
+          setDropTargetFolder(null)
+        }}
+        onQuickOrganizeDrop={(folderId) => {
+          // Store the target folder for when Tauri fires the drop event
+          setDropTargetFolder(folderId)
+        }}
+        onClose={() => setIsDragging(false)}
+      />
+
 
       <header className="header" style={{ display: 'flex', alignItems: 'center' }}>
         <img src={logo} alt="Repak Icon" className="repak-icon" style={{ width: '50px', height: '50px', marginRight: '10px' }} />
