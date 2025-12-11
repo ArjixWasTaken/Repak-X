@@ -40,7 +40,7 @@ jobs:
         working-directory: repak-gui
         run: npm install
 
-      - name: Cache Rust Dependencies
+      - name: Cache Cargo Registry
         uses: actions/cache@v4
         with:
           path: |
@@ -48,10 +48,27 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-registry-
+
+      - name: Cache Rust Build (target folder)
+        uses: actions/cache@v4
+        with:
+          path: target/
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-target-
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+
+      - name: Configure sccache
+        shell: pwsh
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $env:GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
 
       - name: Auto-Increment Version
         id: version
@@ -127,6 +144,8 @@ jobs:
         shell: pwsh
         run: |
           Write-Host "Building Rust workspace..." -ForegroundColor Cyan
+          # Use all available cores for parallel compilation
+          $env:CARGO_BUILD_JOBS = [Environment]::ProcessorCount
           cargo build --release --workspace
 
       - name: Create Distribution Package (ZIP Only)
