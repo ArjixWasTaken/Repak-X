@@ -18,47 +18,56 @@ import {
   ViewList as ViewListIcon,
   Wifi as WifiIcon,
   ViewSidebar as ViewSidebarIcon,
-  PlayArrow as PlayArrowIcon
+  PlayArrow as PlayArrowIcon,
+  Check as CheckIcon
 } from '@mui/icons-material'
+import { RiDeleteBin2Fill } from 'react-icons/ri'
+import { FaTag } from "react-icons/fa6"
+import Checkbox from './components/ui/Checkbox'
 import ModDetailsPanel from './components/ModDetailsPanel'
+import ModsList from './components/ModsList'
 import InstallModPanel from './components/InstallModPanel'
 import SettingsPanel from './components/SettingsPanel'
 import SharingPanel from './components/SharingPanel'
 import FileTree from './components/FileTree'
 import FolderTree from './components/FolderTree'
 import ContextMenu from './components/ContextMenu'
+import LogDrawer from './components/LogDrawer'
+import DropZoneOverlay from './components/DropZoneOverlay'
 import { AuroraText } from './components/ui/AuroraText'
 import Switch from './components/ui/Switch'
+import NumberInput from './components/ui/NumberInput'
 import characterData from './data/character_data.json'
 import './App.css'
 import './styles/theme.css'
 import './styles/Badges.css'
 import './styles/Fonts.css'
-import logo from './assets/RepakIcon-x256.png'
+import logo from './assets/app-icons/RepakIcon-x256.png'
+import ClashPanel from './components/ClashPanel'
 
 const toTagArray = (tags) => Array.isArray(tags) ? tags : (tags ? [tags] : [])
 
 function detectHeroes(files) {
   const heroIds = new Set()
-  
+
   // Regex patterns matching backend logic
   const pathRegex = /(?:Characters|Hero_ST|Hero)\/(\d{4})/
   const filenameRegex = /[_/](10[1-6]\d)(\d{3})/
-  
+
   files.forEach(file => {
     // Check path
     const pathMatch = file.match(pathRegex)
     if (pathMatch) {
       heroIds.add(pathMatch[1])
     }
-    
+
     // Check filename
     const filenameMatch = file.match(filenameRegex)
     if (filenameMatch) {
       heroIds.add(filenameMatch[1])
     }
   })
-  
+
   // Map IDs to names
   const heroNames = new Set()
   heroIds.forEach(id => {
@@ -67,7 +76,7 @@ function detectHeroes(files) {
       heroNames.add(char.name)
     }
   })
-  
+
   return Array.from(heroNames)
 }
 
@@ -85,202 +94,15 @@ function getAdditionalCategories(details) {
   return []
 }
 
-// Mod Item Component
-function ModItem({ mod, selectedMod, selectedMods, setSelectedMod, handleToggleModSelection, handleToggleMod, handleDeleteMod, handleRemoveTag, formatFileSize, hideSuffix, onContextMenu, handleSetPriority }) {
-  const [isDeleteHolding, setIsDeleteHolding] = useState(false)
-  const holdTimeoutRef = useRef(null)
-  const rawName = mod.custom_name || mod.path.split('\\').pop()
-  const nameWithoutExt = rawName.replace(/\.[^/.]+$/, '')
-  const suffixMatch = nameWithoutExt.match(/(_\d+_P)$/i)
-  const cleanName = suffixMatch ? nameWithoutExt.slice(0, -suffixMatch[0].length) : nameWithoutExt
-  const suffix = suffixMatch ? suffixMatch[0] : ''
-  const shouldShowSuffix = !hideSuffix && suffix
-  const tags = toTagArray(mod.custom_tags)
+// ModItem has been moved to src/components/ModsList.jsx
 
-  useEffect(() => () => clearTimeout(holdTimeoutRef.current), [])
-
-  const startDeleteHold = (event) => {
-    event.stopPropagation()
-    clearTimeout(holdTimeoutRef.current)
-    setIsDeleteHolding(true)
-    holdTimeoutRef.current = setTimeout(() => {
-      setIsDeleteHolding(false)
-      handleDeleteMod(mod.path)
-    }, 2000)
-  }
-
-  const cancelDeleteHold = (event) => {
-    event.stopPropagation()
-    clearTimeout(holdTimeoutRef.current)
-    if (isDeleteHolding) setIsDeleteHolding(false)
-  }
-
-  return (
-    <motion.div 
-      className={`mod-card mod-item ${selectedMod === mod ? 'selected' : ''} ${!mod.enabled ? 'disabled' : ''} ${selectedMods.has(mod.path) ? 'bulk-selected' : ''}`}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: mod.enabled ? 1 : 0.5 }}
-      whileHover={{ scale: 1.01 }}
-      transition={{ duration: 0.2 }}
-      onContextMenu={(e) => onContextMenu(e, mod)}
-    >
-      <div className="mod-card-row">
-        <div className="mod-card-main">
-          <Tooltip title="Select mod">
-            <input
-              type="checkbox"
-              checked={selectedMods.has(mod.path)}
-              onChange={() => handleToggleModSelection(mod)}
-              onClick={(e) => e.stopPropagation()}
-              className="modern-checkbox"
-            />
-          </Tooltip>
-          <motion.button 
-            type="button"
-            className="mod-name-button"
-            onClick={(e) => {
-              if (e.ctrlKey || e.metaKey) {
-                handleToggleModSelection(mod)
-              } else {
-                setSelectedMod(mod)
-              }
-            }}
-            whileHover={{ color: 'var(--accent-primary)' }}
-            title={rawName}
-          >
-            <span className="mod-name-text">
-              {cleanName}
-              {shouldShowSuffix && <span className="mod-name-suffix">{suffix}</span>}
-            </span>
-          </motion.button>
-        </div>
-      </div>
-      
-      {tags.length > 0 && (
-        <div className="tag-container">
-          {tags.map(tag => (
-            <span key={tag} className="tag">
-              {tag}
-              <button
-                type="button"
-                className="tag-remove"
-                aria-label={`Remove ${tag}`}
-                onClick={(e) => {
-                  e.stopPropagation()
-                  handleRemoveTag(mod.path, tag)
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-      
-      <div className="mod-card-row mod-card-actions">
-        <span className="mod-size" style={{ marginRight: '12px', fontSize: '0.85rem', opacity: 0.7 }}>{formatFileSize(mod.file_size)}</span>
-        <div className="priority-control" onClick={e => e.stopPropagation()} style={{ display: 'flex', alignItems: 'center', marginRight: '8px' }}>
-          <span style={{ fontSize: '0.7rem', opacity: 0.7, marginRight: '4px' }}>Pri:</span>
-          <input
-            type="number"
-            min="0"
-            max="999"
-            defaultValue={mod.priority || 0}
-            onBlur={(e) => {
-              const val = parseInt(e.target.value, 10)
-              if (!isNaN(val) && val !== mod.priority) {
-                handleSetPriority(mod.path, val)
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const val = parseInt(e.currentTarget.value, 10)
-                if (!isNaN(val) && val !== mod.priority) {
-                  handleSetPriority(mod.path, val)
-                }
-                e.currentTarget.blur()
-              }
-            }}
-            className="priority-input"
-            style={{ 
-              width: '40px', 
-              background: 'rgba(0,0,0,0.3)', 
-              border: '1px solid rgba(255,255,255,0.1)', 
-              color: 'white', 
-              borderRadius: '3px',
-              padding: '2px 4px',
-              fontSize: '0.8rem',
-              textAlign: 'center'
-            }}
-          />
-        </div>
-        <Tooltip title={mod.enabled ? 'Disable mod' : 'Enable mod'}>
-          <div className="mod-switch-wrapper" onClick={(e) => e.stopPropagation()}>
-            <Switch
-              size="sm"
-              color="primary"
-              checked={mod.enabled}
-              onChange={(_, event) => {
-                event?.stopPropagation()
-                handleToggleMod(mod.path)
-              }}
-              className="mod-switch"
-            />
-          </div>
-        </Tooltip>
-        <Tooltip title="Hold 2s to delete">
-          <button
-            className={`btn-modern btn-danger hold-delete ${isDeleteHolding ? 'holding' : ''}`}
-            onMouseDown={startDeleteHold}
-            onMouseUp={cancelDeleteHold}
-            onMouseLeave={cancelDeleteHold}
-            onTouchStart={startDeleteHold}
-            onTouchEnd={cancelDeleteHold}
-            aria-label="Hold to delete mod"
-          >
-            ×
-          </button>
-        </Tooltip>
-      </div>
-    </motion.div>
-  )
-}
-
-function ClashPanel({ clashes, onClose }) {
-  return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-content" onClick={e => e.stopPropagation()} style={{ maxWidth: '800px', maxHeight: '80vh', display: 'flex', flexDirection: 'column' }}>
-        <h2>Mod Conflicts ({clashes.length})</h2>
-        <div className="clash-list" style={{ overflowY: 'auto', flex: 1, padding: '1rem', background: 'rgba(0,0,0,0.2)', borderRadius: '4px' }}>
-          {clashes.length === 0 ? (
-            <p>No conflicts found!</p>
-          ) : (
-            clashes.map((clash, i) => (
-              <div key={i} className="clash-item" style={{ marginBottom: '1rem', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.5rem' }}>
-                <div className="clash-file" style={{ color: '#aaa', fontSize: '0.9rem', marginBottom: '0.25rem' }}>{clash.file_path}</div>
-                <div className="clash-mods" style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                  {clash.mod_paths.map(path => (
-                    <span key={path} className="tag" style={{ background: 'rgba(255, 100, 100, 0.2)', border: '1px solid rgba(255, 100, 100, 0.4)' }}>
-                      {path.split(/[/\\]/).pop()}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-        <div style={{ marginTop: '1rem', display: 'flex', justifyContent: 'flex-end' }}>
-          <button className="btn-modern" onClick={onClose}>Close</button>
-        </div>
-      </div>
-    </div>
-  )
-}
+// ClashPanel has been moved to src/components/ClashPanel.jsx
 
 function App() {
   const [globalUsmap, setGlobalUsmap] = useState('');
   const [hideSuffix, setHideSuffix] = useState(false);
-  
+  const [autoOpenDetails, setAutoOpenDetails] = useState(false);
+
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
   const [showSettings, setShowSettings] = useState(false);
@@ -317,16 +139,16 @@ function App() {
   const [showInstallPanel, setShowInstallPanel] = useState(false)
   const [modsToInstall, setModsToInstall] = useState([])
   const [installLogs, setInstallLogs] = useState([])
-  const [showInstallLogs, setShowInstallLogs] = useState(false)
   const [selectedFolderId, setSelectedFolderId] = useState('all')
   const [viewMode, setViewMode] = useState('list') // 'grid', 'compact', 'list'
   const [contextMenu, setContextMenu] = useState(null) // { x, y, mod }
-  // OPTIONAL: user-resizable height
-  const [drawerHeight, setDrawerHeight] = useState(380)
-  const resizingRef = useRef(false)
-  
+
   const [clashes, setClashes] = useState([])
   const [showClashPanel, setShowClashPanel] = useState(false)
+  const [launchSuccess, setLaunchSuccess] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const [dropTargetFolder, setDropTargetFolder] = useState(null)
+  const dropTargetFolderRef = useRef(null)
 
   const handleCheckClashes = async () => {
     try {
@@ -348,16 +170,30 @@ function App() {
     try {
       await invoke('set_mod_priority', { modPath, priority })
       setStatus(`Priority set to ${priority}`)
-      
+
       // If the modified mod is currently selected, clear selection to force refresh of details
       // This ensures the details panel updates with the new filename (since priority changes filename)
       if (selectedMod && selectedMod.path === modPath) {
         setSelectedMod(null)
       }
-      
+
       await loadMods()
+
+      // Refresh clash list if panel is open
+      if (showClashPanel) {
+        const result = await invoke('check_mod_clashes')
+        setClashes(result)
+      }
     } catch (error) {
       setStatus('Error setting priority: ' + error)
+    }
+  }
+
+  const handleModSelect = (mod) => {
+    setSelectedMod(mod)
+    if (autoOpenDetails && !isRightPanelOpen) {
+      setLeftPanelWidth(lastPanelWidth > 60 ? lastPanelWidth : 70) // Ensure reasonable width
+      setIsRightPanelOpen(true)
     }
   }
 
@@ -386,12 +222,12 @@ function App() {
   useEffect(() => {
     loadInitialData()
     loadTags()
-    
+
     // Listen for install progress
     const unlisten = listen('install_progress', (event) => {
       setStatus(`Installing... ${Math.round(event.payload)}%`)
     })
-    
+
     const unlistenComplete = listen('install_complete', () => {
       setStatus('Installation complete!')
       loadMods()
@@ -399,7 +235,6 @@ function App() {
 
     const unlistenLogs = listen('install_log', (event) => {
       setInstallLogs(prev => [...prev, event.payload])
-      setShowInstallLogs(true)
     })
 
     // Refresh mod list when character data is updated
@@ -427,8 +262,37 @@ function App() {
           return
         }
         console.log('Parsed mods:', modsData)
-        setModsToInstall(modsData)
-        setShowInstallPanel(true)
+
+        // Check if we should quick-organize to a folder (using ref for current value in closure)
+        const targetFolder = dropTargetFolderRef.current
+        if (targetFolder) {
+          // Quick organize: directly install to the folder without showing install panel
+          console.log('Quick organizing to folder:', targetFolder)
+          setStatus(`Quick installing ${modsData.length} mod(s) to ${targetFolder}...`)
+
+          // Prepare mods with folder assignment for direct install
+          const modsWithFolder = modsData.map(mod => ({
+            ...mod,
+            targetFolder: targetFolder
+          }))
+
+          try {
+            // Install directly
+            await invoke('install_mods', { mods: modsWithFolder })
+            setStatus(`Installed ${modsData.length} mod(s) to ${targetFolder}!`)
+            await loadMods()
+            await loadFolders()
+          } catch (installError) {
+            console.error('Quick install error:', installError)
+            setStatus(`Error installing mods: ${installError}`)
+          }
+
+          setDropTargetFolder(null) // Reset for next drop
+        } else {
+          // Normal drop: show install panel
+          setModsToInstall(modsData)
+          setShowInstallPanel(true)
+        }
       } catch (error) {
         console.error('Parse error:', error)
         setStatus(`Error parsing dropped items: ${error}`)
@@ -438,12 +302,14 @@ function App() {
     // Listen for Tauri drag-drop event
     const unlistenDragDrop = listen('tauri://drag-drop', (event) => {
       const files = event.payload.paths || event.payload
+      setIsDragging(false)
       handleFileDrop(files)
     })
 
     // Listen for Tauri file-drop event
     const unlistenFileDrop = listen('tauri://file-drop', (event) => {
       const files = event.payload.paths || event.payload
+      setIsDragging(false)
       handleFileDrop(files)
     })
 
@@ -470,40 +336,50 @@ function App() {
     }
   }, [])
 
+  // Tauri drag hover detection - use Tauri's events instead of browser events
   useEffect(() => {
-    const handleDragEnter = (e) => {
-      e.preventDefault()
+    // Listen for Tauri drag-enter event (when files first enter the window)
+    const unlistenDragEnter = listen('tauri://drag-enter', () => {
+      console.log('Tauri drag-enter detected')
       setIsDragging(true)
-    }
+    })
 
-    const handleDragLeave = (e) => {
-      e.preventDefault()
+    // Listen for Tauri drag-leave event (when files leave the window)
+    const unlistenDragLeave = listen('tauri://drag-leave', () => {
+      console.log('Tauri drag-leave detected')
       setIsDragging(false)
-    }
+    })
 
-    document.addEventListener('dragenter', handleDragEnter)
-    document.addEventListener('dragleave', handleDragLeave)
-    document.addEventListener('drop', () => setIsDragging(false))
+    // Also reset on drag-cancelled
+    const unlistenDragCancelled = listen('tauri://drag-cancelled', () => {
+      console.log('Tauri drag-cancelled detected')
+      setIsDragging(false)
+    })
 
     return () => {
-      document.removeEventListener('dragenter', handleDragEnter)
-      document.removeEventListener('dragleave', handleDragLeave)
-      document.removeEventListener('drop', () => setIsDragging(false))
+      unlistenDragEnter.then(f => f())
+      unlistenDragLeave.then(f => f())
+      unlistenDragCancelled.then(f => f())
     }
   }, [])
+
+  // Keep the ref in sync with state for access in event listener closures
+  useEffect(() => {
+    dropTargetFolderRef.current = dropTargetFolder
+  }, [dropTargetFolder])
 
   const loadInitialData = async () => {
     try {
       const path = await invoke('get_game_path')
       setGamePath(path)
-      
+
       const ver = await invoke('get_app_version')
       setVersion(ver)
-      
+
       await loadMods()
       await loadFolders()
       await checkGame()
-      
+
       // Start the file watcher
       await invoke('start_file_watcher')
     } catch (error) {
@@ -584,8 +460,8 @@ function App() {
       const adds = getAdditionalCategories(d)
       adds.forEach(cat => catSet.add(cat))
     })
-    setAvailableCharacters(Array.from(charSet).sort((a,b)=>a.localeCompare(b)))
-    setAvailableCategories(Array.from(catSet).sort((a,b)=>a.localeCompare(b)))
+    setAvailableCharacters(Array.from(charSet).sort((a, b) => a.localeCompare(b)))
+    setAvailableCategories(Array.from(catSet).sort((a, b) => a.localeCompare(b)))
     // Keep multi-selections if still valid; otherwise prune invalids
     const validChars = new Set(charSet)
     setSelectedCharacters(prev => {
@@ -653,7 +529,7 @@ function App() {
         multiple: false,
         title: 'Select Marvel Rivals Installation Directory'
       })
-      
+
       if (selected) {
         await invoke('set_game_path', { path: selected })
         setGamePath(selected)
@@ -675,7 +551,7 @@ function App() {
         }],
         title: 'Select Mods to Install'
       })
-      
+
       if (selected && selected.length > 0) {
         const paths = Array.isArray(selected) ? selected : [selected]
         const modsData = await invoke('parse_dropped_files', { paths })
@@ -690,17 +566,17 @@ function App() {
   const handleDevInstallPanel = () => {
     const categories = ['Skin', 'Audio', 'UI', 'VFX', 'Mesh', 'Texture']
     const additionalCats = ['Blueprint', 'Text', '']
-    
+
     const getRandomMod = (i) => {
       const randomChar = characterData[Math.floor(Math.random() * characterData.length)].name
       const randomCat = categories[Math.floor(Math.random() * categories.length)]
       const randomAdd = additionalCats[Math.floor(Math.random() * additionalCats.length)]
-      
+
       let modType = `${randomChar} - ${randomCat}`
       if (randomAdd) {
         modType += ` [${randomAdd}]`
       }
-      
+
       return {
         path: `C:\\Fake\\Path\\Mod${i}.pak`,
         mod_name: `Mod${i}.pak`,
@@ -723,7 +599,7 @@ function App() {
       return
     }
     // No confirmation prompt needed here, the hold-to-delete button handles the intent
-    
+
     try {
       await invoke('delete_mod', { path: modPath })
       setStatus('Mod deleted')
@@ -756,7 +632,7 @@ function App() {
   const handleCreateFolder = async () => {
     const name = prompt('Enter folder name:')
     if (!name) return
-    
+
     try {
       await invoke('create_folder', { name })
       await loadFolders()
@@ -768,7 +644,7 @@ function App() {
 
   const handleDeleteFolder = async (folderId) => {
     // No confirmation prompt needed here, the hold-to-delete button handles the intent
-    
+
     try {
       await invoke('delete_folder', { id: folderId })
       await loadFolders()
@@ -915,15 +791,15 @@ function App() {
     e.preventDefault()
     e.stopPropagation()
     e.currentTarget.classList.remove('drag-over')
-    
+
     if (gameRunning) {
       setStatus('Cannot move mods while game is running')
       return
     }
-    
+
     const modPath = e.dataTransfer.getData('modpath') || e.dataTransfer.getData('text/plain')
     console.log('Drop on folder:', folderId, 'modPath:', modPath)
-    
+
     if (modPath) {
       try {
         // Check if folderId corresponds to the root folder (depth 0)
@@ -951,10 +827,10 @@ function App() {
 
   const handleResizeMove = (e) => {
     if (!isResizing) return
-    
+
     const containerWidth = e.currentTarget.offsetWidth || window.innerWidth
     const newLeftWidth = (e.clientX / containerWidth) * 100
-    
+
     // Constrain right panel between 25% and 40% (left panel 60% - 75%)
     if (newLeftWidth >= 60 && newLeftWidth <= 75) {
       setLeftPanelWidth(newLeftWidth)
@@ -1021,7 +897,7 @@ function App() {
     if (hasCharFilter || hasCatFilter) {
       const d = modDetails[mod.path]
       if (!d) return false // wait for details when filters active
-      
+
       if (hasCatFilter) {
         const mainCatMatch = d.category && selectedCategories.has(d.category)
         const adds = getAdditionalCategories(d)
@@ -1032,7 +908,7 @@ function App() {
       if (hasCharFilter) {
         const isMulti = typeof d.mod_type === 'string' && d.mod_type.startsWith('Multiple Heroes')
         const isGeneric = !d.character_name && !isMulti
-        
+
         let multiMatch = false
         if (isMulti && d.files) {
           const heroes = detectHeroes(d.files)
@@ -1055,11 +931,11 @@ function App() {
   // Apply folder filter to get final list for display
   const filteredMods = baseFilteredMods.filter(mod => {
     if (selectedFolderId === 'all') return true
-    
+
     // Match exact folder OR subfolder
     // e.g. if selected is "Category", match "Category" and "Category/Sub"
-    return mod.folder_id === selectedFolderId || 
-           (mod.folder_id && mod.folder_id.startsWith(selectedFolderId + '/'))
+    return mod.folder_id === selectedFolderId ||
+      (mod.folder_id && mod.folder_id.startsWith(selectedFolderId + '/'))
   })
 
   // Group mods by folder
@@ -1083,7 +959,6 @@ function App() {
     try {
       setShowInstallPanel(false)
       setInstallLogs([])
-      setShowInstallLogs(true)
       setStatus('Installing mods...')
 
       await invoke('install_mods', { mods: modsWithSettings })
@@ -1125,6 +1000,7 @@ function App() {
   const handleSaveSettings = (settings) => {
     setGlobalUsmap(settings.globalUsmap || '')
     setHideSuffix(settings.hideSuffix || false)
+    setAutoOpenDetails(settings.autoOpenDetails || false)
     // TODO: Save to backend state
     setStatus('Settings saved')
   }
@@ -1133,7 +1009,7 @@ function App() {
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') || 'dark';
     const savedAccent = localStorage.getItem('accentColor') || '#4a9eff';
-    
+
     handleThemeChange(savedTheme);
     handleAccentChange(savedAccent);
   }, []);
@@ -1152,25 +1028,6 @@ function App() {
     localStorage.setItem('accentColor', newAccent);
   };
 
-  useEffect(() => {
-    const onMove = (e) => {
-      if (!resizingRef.current) return
-      const y = e.clientY
-      const vh = window.innerHeight
-      const newH = Math.min(Math.max(vh - y, 160), Math.round(vh * 0.85))
-      setDrawerHeight(newH)
-    }
-    const stop = () => { resizingRef.current = false }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', stop)
-    window.addEventListener('mouseleave', stop)
-    return () => {
-      window.removeEventListener('mousemove', onMove)
-      window.removeEventListener('mouseup', stop)
-      window.removeEventListener('mouseleave', stop)
-    }
-  }, [])
-
   return (
     <div className="app">
       {showInstallPanel && (
@@ -1186,13 +1043,15 @@ function App() {
       {showClashPanel && (
         <ClashPanel
           clashes={clashes}
+          mods={mods}
+          onSetPriority={handleSetPriority}
           onClose={() => setShowClashPanel(false)}
         />
       )}
 
       {showSettings && (
         <SettingsPanel
-          settings={{ globalUsmap, hideSuffix }}
+          settings={{ globalUsmap, hideSuffix, autoOpenDetails }}
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
           theme={theme}
@@ -1207,7 +1066,7 @@ function App() {
       )}
 
       {showSharingPanel && (
-        <SharingPanel 
+        <SharingPanel
           onClose={() => setShowSharingPanel(false)}
           gamePath={gamePath}
           installedMods={mods}
@@ -1215,35 +1074,87 @@ function App() {
         />
       )}
 
+      {/* Drop Zone Overlay */}
+      <DropZoneOverlay
+        isVisible={isDragging}
+        folders={folders}
+        onInstallDrop={() => {
+          // Just signals intent - actual files come from Tauri event
+          setDropTargetFolder(null)
+        }}
+        onQuickOrganizeDrop={(folderId) => {
+          // Store the target folder for when Tauri fires the drop event
+          setDropTargetFolder(folderId)
+        }}
+        onClose={() => setIsDragging(false)}
+      />
+
+
       <header className="header" style={{ display: 'flex', alignItems: 'center' }}>
         <img src={logo} alt="Repak Icon" className="repak-icon" style={{ width: '50px', height: '50px', marginRight: '10px' }} />
         <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.75rem' }}>
-          <h1 style={{ margin: 0 }}>Repak GUI <AuroraText>Revamped</AuroraText> [DEV]</h1>
+          <h1 style={{ margin: 0 }}>Repak <AuroraText className="font-bbh-bartle">X</AuroraText> [DEV]</h1>
           <span className="version" style={{ fontSize: '0.9rem', opacity: 0.7 }}>v{version}</span>
         </div>
         <div style={{ display: 'flex', gap: '1rem', alignItems: 'center', marginLeft: 'auto' }}>
-          <button 
+          <button
             className="btn-settings"
-            title="Launch Marvel Rivals (Coming Soon)"
-            style={{ 
-              background: 'rgba(74, 158, 255, 0.1)', 
-              color: '#4a9eff', 
-              border: '1px solid rgba(74, 158, 255, 0.3)',
+            title="Launch Rivals"
+            style={{
+              background: launchSuccess ? 'rgba(76, 175, 80, 0.15)' : 'rgba(74, 158, 255, 0.1)',
+              color: launchSuccess ? '#4CAF50' : '#4a9eff',
+              border: launchSuccess ? '1px solid rgba(76, 175, 80, 0.5)' : '1px solid rgba(74, 158, 255, 0.3)',
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              fontWeight: 600
+              fontWeight: 600,
+              transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              padding: '6px 16px',
+              minWidth: '100px',
+              justifyContent: 'center'
             }}
-            onClick={() => alert('Launch Game feature requires backend configuration. See docs/LAUNCH_GAME_PROPOSAL.md')}
+            onClick={async () => {
+              if (launchSuccess) return
+              try {
+                await invoke('launch_game')
+                setStatus('Game launched')
+                setLaunchSuccess(true)
+                setTimeout(() => setLaunchSuccess(false), 3000)
+              } catch (error) {
+                setStatus('Error launching game: ' + error)
+              }
+            }}
           >
-            <PlayArrowIcon /> Play
+            <AnimatePresence mode="wait">
+              {launchSuccess ? (
+                <motion.span
+                  key="success"
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.5 }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                  <CheckIcon fontSize="small" /> Launched
+                </motion.span>
+              ) : (
+                <motion.span
+                  key="play"
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.5 }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '8px' }}
+                >
+                  <PlayArrowIcon fontSize="small" /> Launch Game
+                </motion.span>
+              )}
+            </AnimatePresence>
           </button>
 
           <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', background: 'rgba(255,0,0,0.1)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255,0,0,0.3)' }}>
-            <input 
-              type="checkbox" 
-              checked={gameRunning} 
-              onChange={(e) => setGameRunning(e.target.checked)} 
+            <input
+              type="checkbox"
+              checked={gameRunning}
+              onChange={(e) => setGameRunning(e.target.checked)}
             />
             <span style={{ fontSize: '0.8rem', color: '#ff6b6b', fontWeight: 'bold' }}>DEV: Game Running</span>
           </label>
@@ -1268,15 +1179,15 @@ function App() {
               <span className="running-text">Game Running</span>
             </div>
           )}
-          <button 
-            onClick={() => setShowSharingPanel(true)} 
+          <button
+            onClick={() => setShowSharingPanel(true)}
             className="btn-settings"
             title="Share Mods"
           >
             <WifiIcon /> Share
           </button>
-          <button 
-            onClick={() => setShowSettings(true)} 
+          <button
+            onClick={() => setShowSettings(true)}
             className="btn-settings"
           >
             <SettingsIcon /> Settings
@@ -1331,7 +1242,12 @@ function App() {
         {/* Main 3-Panel Layout */}
         <div className="main-panels" onMouseMove={handleResizeMove}>
           {/* Wrapper for Left Sidebar and Center Panel */}
-          <div className="content-wrapper" style={{ width: `${leftPanelWidth}%`, display: 'flex', height: '100%' }}>
+          <motion.div
+            className="content-wrapper"
+            animate={{ width: `${leftPanelWidth}%` }}
+            transition={isResizing ? { duration: 0 } : { type: "tween", ease: "circOut", duration: 0.35 }}
+            style={{ display: 'flex', height: '100%' }}
+          >
             {/* Left Sidebar - Folders */}
             <div className="left-sidebar">
               {/* Filters Section */}
@@ -1351,7 +1267,7 @@ function App() {
                   </div>
 
                   {/* Character/Hero Chips */}
-                  <div 
+                  <div
                     className="filter-section-header"
                     onClick={() => setShowCharacterFilters(v => !v)}
                     style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
@@ -1393,7 +1309,7 @@ function App() {
                   )}
 
                   {/* Category Chips */}
-                  <div 
+                  <div
                     className="filter-section-header"
                     onClick={() => setShowTypeFilters(v => !v)}
                     style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: '0.25rem' }}
@@ -1429,7 +1345,7 @@ function App() {
                 </div>
               </div>
               <div className="folder-list">
-                <FolderTree 
+                <FolderTree
                   folders={folders}
                   selectedFolderId={selectedFolderId}
                   onSelect={setSelectedFolderId}
@@ -1437,8 +1353,8 @@ function App() {
                   onContextMenu={handleFolderContextMenu}
                   getCount={(id) => {
                     if (id === 'all') return baseFilteredMods.length;
-                    return baseFilteredMods.filter(m => 
-                      m.folder_id === id || 
+                    return baseFilteredMods.filter(m =>
+                      m.folder_id === id ||
                       (m.folder_id && m.folder_id.startsWith(id + '/'))
                     ).length;
                   }}
@@ -1452,10 +1368,10 @@ function App() {
               <div className="center-header">
                 <div className="header-title">
                   <h2>
-                    {selectedFolderId === 'all' ? 'All Mods' : 
-                     folders.find(f => f.id === selectedFolderId)?.name || 'Unknown Folder'}
-                    <span className="mod-count" style={{ marginLeft: '0.75rem', opacity: 0.5, fontSize: '0.8em', fontWeight: 'normal' }}>
-                      ({filteredMods.length})
+                    {selectedFolderId === 'all' ? 'All Mods' :
+                      folders.find(f => f.id === selectedFolderId)?.name || 'Unknown Folder'}
+                    <span className="mod-count" style={{ marginLeft: '0.75rem', opacity: 0.5, fontSize: '0.65em', fontWeight: 'normal' }}>
+                      ({filteredMods.filter(m => m.enabled).length} / {filteredMods.length} Enabled)
                     </span>
                   </h2>
                 </div>
@@ -1464,22 +1380,22 @@ function App() {
                     ⚠️ Check Conflicts
                   </button>
                   <div className="view-switcher">
-                    <button 
-                      onClick={() => setViewMode('grid')} 
+                    <button
+                      onClick={() => setViewMode('grid')}
                       className={`btn-icon-small ${viewMode === 'grid' ? 'active' : ''}`}
                       title="Grid View"
                     >
                       <GridViewIcon fontSize="small" />
                     </button>
-                    <button 
-                      onClick={() => setViewMode('compact')} 
+                    <button
+                      onClick={() => setViewMode('compact')}
                       className={`btn-icon-small ${viewMode === 'compact' ? 'active' : ''}`}
                       title="Compact View"
                     >
                       <ViewModuleIcon fontSize="small" />
                     </button>
-                    <button 
-                      onClick={() => setViewMode('list')} 
+                    <button
+                      onClick={() => setViewMode('list')}
                       className={`btn-icon-small ${viewMode === 'list' ? 'active' : ''}`}
                       title="List View"
                     >
@@ -1487,8 +1403,8 @@ function App() {
                     </button>
                   </div>
                   <div className="divider-vertical" />
-                  <button 
-                    onClick={toggleRightPanel} 
+                  <button
+                    onClick={toggleRightPanel}
                     className={`btn-ghost ${!isRightPanelOpen ? 'active' : ''}`}
                     title={isRightPanelOpen ? "Collapse Details" : "Expand Details"}
                   >
@@ -1503,73 +1419,68 @@ function App() {
 
               {/* Bulk Actions Toolbar */}
               <div className={`bulk-actions-toolbar ${selectedMods.size === 0 ? 'inactive' : ''}`}>
-                 <div className="selection-info">
-                   {selectedMods.size} selected
-                   <button onClick={handleDeselectAll} className="btn-link">Clear</button>
-                 </div>
-                 <div className="bulk-controls">
-                   <select
-                      className="toolbar-select"
-                      disabled={selectedMods.size === 0}
-                      defaultValue=""
-                      onChange={(e) => {
-                        const folderId = e.target.value
-                        if (!folderId) return
-                        handleAssignToFolder(folderId)
-                        e.target.value = ''
-                      }}
-                    >
-                      <option value="">Move to...</option>
-                      {folders.map(f => (
-                        <option key={f.id} value={f.id}>{f.name}</option>
-                      ))}
-                    </select>
-                 </div>
+                <div className="selection-info">
+                  {selectedMods.size} selected
+                  <button onClick={handleDeselectAll} className="btn-link">Clear</button>
+                </div>
+                <div className="bulk-controls">
+                  <select
+                    className="toolbar-select"
+                    disabled={selectedMods.size === 0}
+                    defaultValue=""
+                    onChange={(e) => {
+                      const folderId = e.target.value
+                      if (!folderId) return
+                      handleAssignToFolder(folderId)
+                      e.target.value = ''
+                    }}
+                  >
+                    <option value="">Move to...</option>
+                    {folders.map(f => (
+                      <option key={f.id} value={f.id}>{f.name}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
-              <div className={`mod-list-grid view-${viewMode}`} style={{ flex: 1, overflowY: 'auto', padding: '1rem' }}>
-                {filteredMods.length === 0 ? (
-                  <div className="empty-state">
-                    <p>No mods found in this folder.</p>
-                  </div>
-                ) : (
-                  filteredMods.map(mod => (
-                    <ModItem 
-                      key={mod.path} 
-                      mod={mod}
-                      selectedMod={selectedMod}
-                      selectedMods={selectedMods}
-                      setSelectedMod={setSelectedMod}
-                      handleToggleModSelection={handleToggleModSelection}
-                      handleToggleMod={handleToggleMod}
-                      handleDeleteMod={handleDeleteMod}
-                      handleRemoveTag={handleRemoveTag}
-                      formatFileSize={formatFileSize}
-                      hideSuffix={hideSuffix}
-                      onContextMenu={handleContextMenu}
-                      handleSetPriority={handleSetPriority}
-                    />
-                  ))
-                )}
-              </div>
+              <ModsList
+                mods={filteredMods}
+                viewMode={viewMode}
+                selectedMod={selectedMod}
+                selectedMods={selectedMods}
+                onSelect={handleModSelect}
+                onToggleSelection={handleToggleModSelection}
+                onToggleMod={handleToggleMod}
+                onDeleteMod={handleDeleteMod}
+                onRemoveTag={handleRemoveTag}
+                onSetPriority={handleSetPriority}
+                onContextMenu={handleContextMenu}
+                formatFileSize={formatFileSize}
+                hideSuffix={hideSuffix}
+              />
             </div>
-          </div>
+          </motion.div>
 
           {/* Resize Handle */}
-          {isRightPanelOpen && (
-            <div 
-              className="resize-handle"
-              onMouseDown={handleResizeStart}
-              style={{ left: `${leftPanelWidth}%` }}
-            />
-          )}
+          {/* Resize Handle */}
+          <motion.div
+            className="resize-handle"
+            onMouseDown={handleResizeStart}
+            animate={{ left: `${leftPanelWidth}%` }}
+            transition={isResizing ? { duration: 0 } : { type: "tween", ease: "circOut", duration: 0.35 }}
+          />
 
           {/* Right Panel - Mod Details (Always Visible) */}
-          <div className="right-panel" style={{ width: `${100 - leftPanelWidth}%`, display: isRightPanelOpen ? 'flex' : 'none' }}>
+          <motion.div
+            className="right-panel"
+            animate={{ width: `${100 - leftPanelWidth}%` }}
+            transition={isResizing ? { duration: 0 } : { type: "tween", ease: "circOut", duration: 0.35 }}
+            style={{ display: 'flex' }}
+          >
             {selectedMod ? (
               <div className="mod-details-and-contents" style={{ display: 'flex', gap: '1rem', height: '100%', overflow: 'hidden' }}>
                 <div style={{ flex: 1, minWidth: '200px', height: '100%' }}>
-                  <ModDetailsPanel 
+                  <ModDetailsPanel
                     mod={selectedMod}
                     initialDetails={modDetails[selectedMod.path]}
                     onClose={() => setSelectedMod(null)}
@@ -1582,100 +1493,45 @@ function App() {
                 </div>
               </div>
             ) : (
-               <div className="no-selection">
-                 <p>Select a mod to view details</p>
-               </div>
-             )}
-          </div>
-        </div>
-      </div>
-
-      <motion.div
-        className="install-drawer"
-        animate={{ height: showInstallLogs ? drawerHeight : 36 }}
-        transition={{ type: 'tween', duration: 0.25 }}
-      >
-        <div
-          className="install-drawer-header"
-          onClick={() => setShowInstallLogs(v => !v)}
-        >
-          <span className="status-text">{status || 'Idle'}</span>
-          <div
-            className="drawer-actions"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <button
-              className="btn-link"
-              onClick={() => setShowInstallLogs(v => !v)}
-            >
-              {showInstallLogs ? 'Hide Log ▼' : 'Show Log ▲'}
-            </button>
-            {installLogs.length > 0 && showInstallLogs && (
-              <button
-                className="btn-link"
-                onClick={() => setInstallLogs([])}
-              >
-                Clear
-              </button>
+              <div className="no-selection">
+                <p>Select a mod to view details</p>
+              </div>
             )}
-          </div>
+          </motion.div>
         </div>
-        {showInstallLogs && (
-          <div
-            className="drawer-resize-handle"
-            onMouseDown={(e) => {
-              e.stopPropagation()
-              resizingRef.current = true
-            }}
-            title="Drag to resize"
-          />
-        )}
-        <AnimatePresence initial={false}>
-          {showInstallLogs && (
-            <motion.div
-              className="install-drawer-body"
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 12 }}
-              transition={{ duration: 0.2 }}
-            >
-              {installLogs.length === 0 ? (
-                <div className="log-empty">Waiting for installation...</div>
-              ) : (
-                <div className="log-scroll">
-                  {installLogs.map((log, i) => (
-                    <div key={i} className="log-line">{log}</div>
-                  ))}
-                </div>
-              )}
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
+      </div >
 
-      {contextMenu && (
-        <ContextMenu
-          x={contextMenu.x}
-          y={contextMenu.y}
-          mod={contextMenu.mod}
-          folder={contextMenu.folder}
-          onClose={closeContextMenu}
-          onAssignTag={(tag) => contextMenu.mod && handleAddTagToSingleMod(contextMenu.mod.path, tag)}
-          onMoveTo={(folderId) => contextMenu.mod && handleMoveSingleMod(contextMenu.mod.path, folderId)}
-          onCreateFolder={handleCreateFolder}
-          folders={folders}
-          onDelete={() => {
-            if (contextMenu.folder) {
-              handleDeleteFolder(contextMenu.folder.id)
-            } else if (contextMenu.mod) {
-              handleDeleteMod(contextMenu.mod.path)
-            }
-          }}
-          onToggle={() => contextMenu.mod && handleToggleMod(contextMenu.mod.path)}
-          allTags={allTags}
-        />
-      )}
-    </div>
+      <LogDrawer
+        status={status}
+        logs={installLogs}
+        onClear={() => setInstallLogs([])}
+      />
+
+      {
+        contextMenu && (
+          <ContextMenu
+            x={contextMenu.x}
+            y={contextMenu.y}
+            mod={contextMenu.mod}
+            folder={contextMenu.folder}
+            onClose={closeContextMenu}
+            onAssignTag={(tag) => contextMenu.mod && handleAddTagToSingleMod(contextMenu.mod.path, tag)}
+            onMoveTo={(folderId) => contextMenu.mod && handleMoveSingleMod(contextMenu.mod.path, folderId)}
+            onCreateFolder={handleCreateFolder}
+            folders={folders}
+            onDelete={() => {
+              if (contextMenu.folder) {
+                handleDeleteFolder(contextMenu.folder.id)
+              } else if (contextMenu.mod) {
+                handleDeleteMod(contextMenu.mod.path)
+              }
+            }}
+            onToggle={() => contextMenu.mod && handleToggleMod(contextMenu.mod.path)}
+            allTags={allTags}
+          />
+        )
+      }
+    </div >
   )
 }
 
