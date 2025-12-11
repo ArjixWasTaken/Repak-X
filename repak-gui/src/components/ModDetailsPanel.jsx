@@ -14,18 +14,53 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
   const [error, setError] = useState(null)
 
   useEffect(() => {
-    if (mod) {
-      setError(null) // Reset error state when mod changes
-      if (initialDetails && initialDetails.mod_path === mod.path) {
+    let cancelled = false
+
+    const loadDetails = async () => {
+      if (!mod) return
+
+      setError(null)
+
+      // Check if we already have details for this mod
+      if (initialDetails && (initialDetails.mod_path === mod.path || !initialDetails.mod_path)) {
         setDetails(initialDetails)
         setLoading(false)
-      } else if (initialDetails && !initialDetails.mod_path) {
-        // Fallback if mod_path isn't in details (older backend version?)
-        setDetails(initialDetails)
-        setLoading(false)
-      } else {
-        loadModDetails()
+        return
       }
+
+      // Need to fetch details
+      try {
+        setLoading(true)
+        setError(null)
+        console.log('Loading details for:', mod.path)
+        const modDetails = await invoke('get_mod_details', {
+          modPath: mod.path
+        })
+
+        // Check if this request is still relevant
+        if (cancelled) {
+          console.log('Request cancelled, ignoring result for:', mod.path)
+          return
+        }
+
+        console.log('Received details:', modDetails)
+        setDetails(modDetails)
+      } catch (err) {
+        if (cancelled) return
+        console.error('Failed to load mod details:', err)
+        setError(err.toString())
+      } finally {
+        if (!cancelled) {
+          setLoading(false)
+        }
+      }
+    }
+
+    loadDetails()
+
+    // Cleanup: cancel pending request when mod changes
+    return () => {
+      cancelled = true
     }
   }, [mod, initialDetails])
 
@@ -56,23 +91,7 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
     return []
   }, [details])
 
-  const loadModDetails = async () => {
-    try {
-      setLoading(true)
-      setError(null)
-      console.log('Loading details for:', mod.path)
-      const modDetails = await invoke('get_mod_details', {
-        modPath: mod.path
-      })
-      console.log('Received details:', modDetails)
-      setDetails(modDetails)
-    } catch (err) {
-      console.error('Failed to load mod details:', err)
-      setError(err.toString())
-    } finally {
-      setLoading(false)
-    }
-  }
+
 
   if (!mod) return null
 
