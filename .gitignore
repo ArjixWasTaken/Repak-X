@@ -7,7 +7,7 @@ repak-gui/dist/
 
 # Ignored build artifacts (keep these)
 repak-gui/package-lock.json
-repak-gui/src/assets/
+Cargo.lock
 
 UAssetAPI/UAssetAPI/bin/
 UAssetAPI/UAssetAPI/obj/
