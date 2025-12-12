@@ -8,6 +8,10 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: sccache
+  SCCACHE_GHA_ENABLED: "true"
+  SCCACHE_IDLE_TIMEOUT: 0
+  SCCACHE_IGNORE_SERVER_IO_ERROR: 1
 
 jobs:
   build-and-release:
@@ -64,11 +68,11 @@ jobs:
       - name: Install sccache
         uses: mozilla-actions/sccache-action@v0.0.4
 
-      - name: Configure sccache
+      - name: Start sccache server
         shell: pwsh
         run: |
-          echo "SCCACHE_GHA_ENABLED=true" >> $env:GITHUB_ENV
-          echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+          sccache --start-server
+          sccache --show-stats
 
       - name: Auto-Increment Version
         id: version
@@ -300,3 +304,10 @@ jobs:
           name: repak-gui-revamped-v${{ steps.version.outputs.VERSION }}
           path: ${{ steps.package.outputs.ZIP_PATH }}
           retention-days: 30
+
+      - name: Stop sccache and show stats
+        if: always()
+        shell: pwsh
+        run: |
+          sccache --show-stats
+          sccache --stop-server
