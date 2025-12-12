@@ -60,9 +60,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target/
-          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}-${{ hashFiles('**/*.rs') }}
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'repak-gui/tauri.conf.json', 'repak-gui/package.json') }}-${{ hashFiles('**/*.rs') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock') }}-
+            ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'repak-gui/tauri.conf.json', 'repak-gui/package.json') }}-
             ${{ runner.os }}-cargo-target-
 
       - name: Install sccache
