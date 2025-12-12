@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import { Tooltip } from '@mui/material'
 import { FaTag } from "react-icons/fa6"
-import characterData from '../data/character_data.json'
 import FileTree from './FileTree'
 import './ModDetailsPanel.css'
 
@@ -12,6 +12,30 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
   const [details, setDetails] = useState(initialDetails || null)
   const [loading, setLoading] = useState(!initialDetails)
   const [error, setError] = useState(null)
+  const [characterData, setCharacterData] = useState([])
+
+  // Fetch character data from Roaming folder via backend
+  useEffect(() => {
+    const loadCharacterData = async () => {
+      try {
+        const data = await invoke('get_character_data')
+        setCharacterData(data)
+      } catch (err) {
+        console.error('Failed to load character data:', err)
+        setCharacterData([])
+      }
+    }
+    loadCharacterData()
+
+    // Listen for character data updates (e.g., after GitHub sync)
+    const unlisten = listen('character_data_updated', () => {
+      invoke('get_character_data').then(setCharacterData)
+    })
+
+    return () => {
+      unlisten.then(fn => fn())
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -65,11 +89,11 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
   }, [mod, initialDetails])
 
   const heroesList = useMemo(() => {
-    if (details && details.files) {
-      return detectHeroes(details.files)
+    if (details && details.files && characterData.length > 0) {
+      return detectHeroes(details.files, characterData)
     }
     return []
-  }, [details])
+  }, [details, characterData])
 
   const additionalBadges = useMemo(() => {
     if (!details) return []
@@ -122,8 +146,8 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
               <div className="badges-container">
                 {details.character_name && (
                   <div className="character-badge" title="Character">
-                    {getHeroImage(details.character_name) && (
-                      <img src={getHeroImage(details.character_name)} alt="" />
+                    {getHeroImage(details.character_name, characterData) && (
+                      <img src={getHeroImage(details.character_name, characterData)} alt="" />
                     )}
                     {details.character_name}
                   </div>
@@ -134,8 +158,8 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose }) {
                       <div className="heroes-list">
                         {heroesList.map(name => (
                           <span key={name} className="tag hero-tag">
-                            {getHeroImage(name) && (
-                              <img src={getHeroImage(name)} alt="" />
+                            {getHeroImage(name, characterData) && (
+                              <img src={getHeroImage(name, characterData)} alt="" />
                             )}
                             {name}
                           </span>
@@ -239,7 +263,7 @@ function formatFileSize(bytes) {
   return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i]
 }
 
-function detectHeroes(files) {
+function detectHeroes(files, characterData) {
   const heroIds = new Set()
 
   // Regex patterns matching backend logic
@@ -272,7 +296,7 @@ function detectHeroes(files) {
   return Array.from(heroNames).sort()
 }
 
-function getHeroImage(heroName) {
+function getHeroImage(heroName, characterData) {
   if (!heroName) return null
 
   // Check for ID at start (e.g. "1025XXX" -> 1025)

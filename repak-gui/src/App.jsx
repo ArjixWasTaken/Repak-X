@@ -993,17 +993,29 @@ function App() {
     setGlobalUsmap(settings.globalUsmap || '')
     setHideSuffix(settings.hideSuffix || false)
     setAutoOpenDetails(settings.autoOpenDetails || false)
-    // TODO: Save to backend state
+
+    // Save to localStorage for persistence
+    localStorage.setItem('hideSuffix', JSON.stringify(settings.hideSuffix || false))
+    localStorage.setItem('autoOpenDetails', JSON.stringify(settings.autoOpenDetails || false))
+
     setStatus('Settings saved')
   }
 
-  // Add this effect to initialize theme
+  // Add this effect to initialize theme and view settings
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') || 'dark';
     const savedAccent = localStorage.getItem('accentColor') || '#4a9eff';
+    const savedViewMode = localStorage.getItem('viewMode') || 'list';
+
+    // Load Mods View Settings
+    const savedHideSuffix = JSON.parse(localStorage.getItem('hideSuffix') || 'false');
+    const savedAutoOpenDetails = JSON.parse(localStorage.getItem('autoOpenDetails') || 'false');
 
     handleThemeChange(savedTheme);
     handleAccentChange(savedAccent);
+    setViewMode(savedViewMode);
+    setHideSuffix(savedHideSuffix);
+    setAutoOpenDetails(savedAutoOpenDetails);
   }, []);
 
   // Add these handlers
@@ -1018,6 +1030,11 @@ function App() {
     document.documentElement.style.setProperty('--accent-primary', newAccent);
     document.documentElement.style.setProperty('--accent-secondary', newAccent);
     localStorage.setItem('accentColor', newAccent);
+  };
+
+  const handleViewModeChange = (newMode) => {
+    setViewMode(newMode);
+    localStorage.setItem('viewMode', newMode);
   };
 
   return (
@@ -1377,21 +1394,21 @@ function App() {
                   </button>
                   <div className="view-switcher">
                     <button
-                      onClick={() => setViewMode('grid')}
+                      onClick={() => handleViewModeChange('grid')}
                       className={`btn-icon-small ${viewMode === 'grid' ? 'active' : ''}`}
                       title="Grid View"
                     >
                       <GridViewIcon fontSize="small" />
                     </button>
                     <button
-                      onClick={() => setViewMode('compact')}
+                      onClick={() => handleViewModeChange('compact')}
                       className={`btn-icon-small ${viewMode === 'compact' ? 'active' : ''}`}
                       title="Compact View"
                     >
                       <ViewModuleIcon fontSize="small" />
                     </button>
                     <button
-                      onClick={() => setViewMode('list')}
+                      onClick={() => handleViewModeChange('list')}
                       className={`btn-icon-small ${viewMode === 'list' ? 'active' : ''}`}
                       title="List View"
                     >
