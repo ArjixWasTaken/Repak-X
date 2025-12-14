@@ -136,29 +136,6 @@ jobs:
           echo "VERSION=$newVersion" >> $env:GITHUB_OUTPUT
           echo "OLD_VERSION=$currentVersion" >> $env:GITHUB_OUTPUT
 
-      - name: Build C# Projects
-        shell: pwsh
-        run: |
-          Write-Host "Building UAssetBridge..." -ForegroundColor Cyan
-          $bridgeProject = "uasset_toolkit\tools\UAssetBridge\UAssetBridge.csproj"
-          $bridgeOutput = "target\uassetbridge"
-          New-Item -ItemType Directory -Force -Path $bridgeOutput | Out-Null
-          dotnet publish $bridgeProject -c Release -r win-x64 --self-contained false -o $bridgeOutput
-          
-          Write-Host "Building UAssetMeshFixer..." -ForegroundColor Cyan
-          $fixerProject = "UAssetAPI\StaticMeshSerializeSizeFixer\UAssetMeshFixer.csproj"
-          $fixerOutput = "target\uassetmeshfixer"
-          New-Item -ItemType Directory -Force -Path $fixerOutput | Out-Null
-          dotnet publish $fixerProject -c Release -r win-x64 --self-contained false -o $fixerOutput
-
-      - name: Build Rust Workspace
-        shell: pwsh
-        run: |
-          Write-Host "Building Rust workspace..." -ForegroundColor Cyan
-          # Use all available cores for parallel compilation
-          $env:CARGO_BUILD_JOBS = [Environment]::ProcessorCount
-          cargo build --release --workspace
-
       - name: Create Distribution Package (ZIP Only)
         id: package
         shell: pwsh
