@@ -23,7 +23,7 @@ use log::{info, warn, error};
 use serde::{Deserialize, Serialize};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, State, Window};
 use utils::find_marvel_rivals;
@@ -603,7 +603,11 @@ async fn parse_dropped_files(
                     let has_static_mesh = detect_static_mesh_files_async(&uasset_files_absolute).await;
                     let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
                     
-                    let has_texture = detect_texture_files_async(&uasset_files_absolute).await;
+                    // For texture detection, we need ALL files (including .ubulk) to check for bulk data
+                    let all_files_absolute: Vec<String> = all_files.iter()
+                        .map(|p| p.to_string_lossy().to_string())
+                        .collect();
+                    let has_texture = detect_texture_files_async(&all_files_absolute).await;
                     let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
                     
                     let summary = format!("[Detection] Directory results: skeletal={}, static={}, texture={}", 
@@ -989,8 +993,72 @@ struct ModToInstall {
     to_repak: bool,
 }
 
+/// Helper function to copy an IoStore bundle (.utoc/.ucas) and recompress if needed
+fn copy_iostore_with_compression_check(
+    utoc_src: &Path,
+    output_dir: &Path,
+    window: &Window,
+) -> Result<u32, String> {
+    use std::sync::Arc;
+    
+    let utoc_name = utoc_src.file_name().unwrap();
+    let ucas_src = utoc_src.with_extension("ucas");
+    let utoc_dest = output_dir.join(utoc_name);
+    let ucas_dest = output_dir.join(ucas_src.file_name().unwrap());
+    
+    // Check if the IoStore is compressed
+    let is_compressed = match retoc::is_iostore_compressed(utoc_src) {
+        Ok(compressed) => compressed,
+        Err(e) => {
+            warn!("[QuickOrganize] Failed to check IoStore compression for {}: {}", utoc_name.to_string_lossy(), e);
+            // Assume compressed if we can't check, just copy
+            true
+        }
+    };
+    
+    if is_compressed {
+        // Already compressed, just copy
+        info!("[QuickOrganize] IoStore {} is already compressed, copying directly", utoc_name.to_string_lossy());
+        let _ = window.emit("install_log", format!("[QuickOrganize] Copying compressed IoStore: {}", utoc_name.to_string_lossy()));
+        
+        std::fs::copy(utoc_src, &utoc_dest)
+            .map_err(|e| format!("Failed to copy {}: {}", utoc_name.to_string_lossy(), e))?;
+        std::fs::copy(&ucas_src, &ucas_dest)
+            .map_err(|e| format!("Failed to copy {}: {}", ucas_src.file_name().unwrap().to_string_lossy(), e))?;
+        
+        Ok(2) // Copied 2 files
+    } else {
+        // Not compressed, need to recompress with Oodle
+        info!("[QuickOrganize] IoStore {} is NOT compressed, recompressing with Oodle...", utoc_name.to_string_lossy());
+        let _ = window.emit("install_log", format!("[QuickOrganize] Recompressing uncompressed IoStore: {}", utoc_name.to_string_lossy()));
+        
+        // First copy to destination
+        std::fs::copy(utoc_src, &utoc_dest)
+            .map_err(|e| format!("Failed to copy {}: {}", utoc_name.to_string_lossy(), e))?;
+        std::fs::copy(&ucas_src, &ucas_dest)
+            .map_err(|e| format!("Failed to copy {}: {}", ucas_src.file_name().unwrap().to_string_lossy(), e))?;
+        
+        // Now recompress in place
+        let config = Arc::new(retoc::Config::default());
+        match retoc::recompress_iostore(&utoc_dest, config) {
+            Ok(_) => {
+                info!("[QuickOrganize] Successfully recompressed IoStore: {}", utoc_name.to_string_lossy());
+                let _ = window.emit("install_log", format!("[QuickOrganize] ✓ Recompressed: {}", utoc_name.to_string_lossy()));
+            }
+            Err(e) => {
+                warn!("[QuickOrganize] Failed to recompress IoStore {}: {}", utoc_name.to_string_lossy(), e);
+                let _ = window.emit("install_log", format!("[QuickOrganize] Warning: Could not recompress {}: {}", utoc_name.to_string_lossy(), e));
+                // Files are still copied, just not recompressed
+            }
+        }
+        
+        Ok(2) // Copied/processed 2 files
+    }
+}
+
 /// Quick Organize: Simply copy/move files to a target folder without any repak processing
 /// This is for organizing existing mod files into subfolders
+/// Now also detects uncompressed IoStore bundles and recompresses them with Oodle
 #[tauri::command]
 async fn quick_organize(
     paths: Vec<String>,
@@ -1054,11 +1122,14 @@ async fn quick_organize(
                 continue;
             }
             
-            // Find and copy all pak/utoc/ucas files from extracted content
+            // Find and copy all pak/utoc/ucas files from extracted content with IoStore compression check
+            let mut processed_utocs: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+            
             for entry in WalkDir::new(temp_path).into_iter().filter_map(|e| e.ok()) {
                 let entry_path = entry.path();
                 if let Some(entry_ext) = entry_path.extension().and_then(|s| s.to_str()) {
-                    if entry_ext == "pak" || entry_ext == "utoc" || entry_ext == "ucas" {
+                    if entry_ext == "pak" {
+                        // Copy pak file
                         let file_name = entry_path.file_name().unwrap();
                         let dest = output_dir.join(file_name);
                         
@@ -1069,7 +1140,21 @@ async fn quick_organize(
                             let _ = window.emit("install_log", format!("[QuickOrganize] Copied: {}", file_name.to_string_lossy()));
                             copied_count += 1;
                         }
+                    } else if entry_ext == "utoc" {
+                        // Process IoStore with compression check
+                        let ucas_path = entry_path.with_extension("ucas");
+                        if ucas_path.exists() && !processed_utocs.contains(entry_path) {
+                            processed_utocs.insert(entry_path.to_path_buf());
+                            match copy_iostore_with_compression_check(entry_path, &output_dir, &window) {
+                                Ok(count) => copied_count += count as i32,
+                                Err(e) => {
+                                    error!("[QuickOrganize] Failed to process IoStore: {}", e);
+                                    let _ = window.emit("install_log", format!("[QuickOrganize] ERROR: {}", e));
+                                }
+                            }
+                        }
                     }
+                    // Skip .ucas files - they're handled together with .utoc
                 }
             }
         }
@@ -1088,11 +1173,22 @@ async fn quick_organize(
             let _ = window.emit("install_log", format!("[QuickOrganize] Copied: {}", file_name.to_string_lossy()));
             copied_count += 1;
             
-            // Also copy utoc and ucas if they exist (IoStore package)
+            // Also handle utoc and ucas if they exist (IoStore package)
+            // Use compression check helper to detect and recompress uncompressed IoStore bundles
             let utoc_path = path.with_extension("utoc");
             let ucas_path = path.with_extension("ucas");
             
-            if utoc_path.exists() {
+            if utoc_path.exists() && ucas_path.exists() {
+                // Use the helper to copy and potentially recompress
+                match copy_iostore_with_compression_check(&utoc_path, &output_dir, &window) {
+                    Ok(count) => copied_count += count as i32,
+                    Err(e) => {
+                        error!("[QuickOrganize] Failed to process IoStore: {}", e);
+                        let _ = window.emit("install_log", format!("[QuickOrganize] ERROR: {}", e));
+                    }
+                }
+            } else if utoc_path.exists() {
+                // Only utoc exists (unusual), just copy it
                 let utoc_name = utoc_path.file_name().unwrap();
                 if let Err(e) = std::fs::copy(&utoc_path, output_dir.join(utoc_name)) {
                     error!("[QuickOrganize] Failed to copy {}: {}", utoc_name.to_string_lossy(), e);
@@ -1100,22 +1196,17 @@ async fn quick_organize(
                     copied_count += 1;
                 }
             }
-            
-            if ucas_path.exists() {
-                let ucas_name = ucas_path.file_name().unwrap();
-                if let Err(e) = std::fs::copy(&ucas_path, output_dir.join(ucas_name)) {
-                    error!("[QuickOrganize] Failed to copy {}: {}", ucas_name.to_string_lossy(), e);
-                } else {
-                    copied_count += 1;
-                }
-            }
         }
-        // Handle directories - copy all pak/utoc/ucas files
+        // Handle directories - copy all pak/utoc/ucas files with IoStore compression check
         else if path.is_dir() {
+            // Collect utoc files to process with compression check
+            let mut processed_utocs: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+            
             for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
                 let entry_path = entry.path();
                 if let Some(entry_ext) = entry_path.extension().and_then(|s| s.to_str()) {
-                    if entry_ext == "pak" || entry_ext == "utoc" || entry_ext == "ucas" {
+                    if entry_ext == "pak" {
+                        // Copy pak file
                         let file_name = entry_path.file_name().unwrap();
                         let dest = output_dir.join(file_name);
                         
@@ -1126,7 +1217,21 @@ async fn quick_organize(
                             let _ = window.emit("install_log", format!("[QuickOrganize] Copied: {}", file_name.to_string_lossy()));
                             copied_count += 1;
                         }
+                    } else if entry_ext == "utoc" {
+                        // Process IoStore with compression check
+                        let ucas_path = entry_path.with_extension("ucas");
+                        if ucas_path.exists() && !processed_utocs.contains(entry_path) {
+                            processed_utocs.insert(entry_path.to_path_buf());
+                            match copy_iostore_with_compression_check(entry_path, &output_dir, &window) {
+                                Ok(count) => copied_count += count as i32,
+                                Err(e) => {
+                                    error!("[QuickOrganize] Failed to process IoStore: {}", e);
+                                    let _ = window.emit("install_log", format!("[QuickOrganize] ERROR: {}", e));
+                                }
+                            }
+                        }
                     }
+                    // Skip .ucas files - they're handled together with .utoc
                 }
             }
         }
@@ -1152,18 +1257,18 @@ async fn install_mods(
     let usmap_filename = state_guard.usmap_path.clone();
     drop(state_guard);
 
-    // Propagate USMAP path to UAssetBridge via environment for UAssetAPI-based processing (from roaming folder)
+    // Propagate USMAP path to UAssetTool via environment for UAssetAPI-based processing (from roaming folder)
     if !usmap_filename.is_empty() {
         if let Some(usmap_full_path) = get_usmap_full_path(&usmap_filename) {
             std::env::set_var("USMAP_PATH", &usmap_full_path);
             info!(
-                "Set USMAP_PATH for UAssetBridge: {}",
+                "Set USMAP_PATH for UAssetTool: {}",
                 usmap_full_path.display()
             );
         } else {
             let expected_path = usmap_dir().join(&usmap_filename);
             error!(
-                "USMAP file not found at expected path for UAssetBridge: {}",
+                "USMAP file not found at expected path for UAssetTool: {}",
                 expected_path.display()
             );
         }
@@ -1326,6 +1431,133 @@ async fn delete_mod(path: String) -> Result<(), String> {
             }
         }
     }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn open_in_explorer(path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    
+    // Get the parent directory if it's a file, or the path itself if it's a directory
+    let dir_to_open = if path_buf.is_file() {
+        path_buf.parent().map(|p| p.to_path_buf()).unwrap_or(path_buf.clone())
+    } else {
+        path_buf.clone()
+    };
+    
+    if !dir_to_open.exists() {
+        return Err(format!("Path does not exist: {}", dir_to_open.display()));
+    }
+    
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, use explorer.exe with /select to highlight the file
+        if path_buf.is_file() {
+            std::process::Command::new("explorer.exe")
+                .args(["/select,", &path_buf.to_string_lossy()])
+                .spawn()
+                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        } else {
+            std::process::Command::new("explorer.exe")
+                .arg(&dir_to_open)
+                .spawn()
+                .map_err(|e| format!("Failed to open explorer: {}", e))?;
+        }
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&dir_to_open)
+            .spawn()
+            .map_err(|e| format!("Failed to open Finder: {}", e))?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&dir_to_open)
+            .spawn()
+            .map_err(|e| format!("Failed to open file manager: {}", e))?;
+    }
+    
+    Ok(())
+}
+
+#[tauri::command]
+async fn copy_to_clipboard(text: String, window: Window) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::{Command, Stdio};
+        use std::io::Write;
+        
+        let mut child = Command::new("powershell")
+            .args(["-Command", "Set-Clipboard", "-Value", &format!("'{}'", text.replace("'", "''"))])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+        
+        child.wait().map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+    }
+    
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::{Command, Stdio};
+        use std::io::Write;
+        
+        let mut child = Command::new("pbcopy")
+            .stdin(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+        
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin.write_all(text.as_bytes())
+                .map_err(|e| format!("Failed to write to clipboard: {}", e))?;
+        }
+        
+        child.wait().map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+    }
+    
+    #[cfg(target_os = "linux")]
+    {
+        use std::process::{Command, Stdio};
+        use std::io::Write;
+        
+        // Try xclip first, then xsel
+        let result = Command::new("xclip")
+            .args(["-selection", "clipboard"])
+            .stdin(Stdio::piped())
+            .spawn();
+        
+        match result {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    stdin.write_all(text.as_bytes())
+                        .map_err(|e| format!("Failed to write to clipboard: {}", e))?;
+                }
+                child.wait().map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+            }
+            Err(_) => {
+                let mut child = Command::new("xsel")
+                    .args(["--clipboard", "--input"])
+                    .stdin(Stdio::piped())
+                    .spawn()
+                    .map_err(|e| format!("Failed to copy to clipboard (neither xclip nor xsel available): {}", e))?;
+                
+                if let Some(mut stdin) = child.stdin.take() {
+                    stdin.write_all(text.as_bytes())
+                        .map_err(|e| format!("Failed to write to clipboard: {}", e))?;
+                }
+                child.wait().map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
+            }
+        }
+    }
+    
+    // Emit an event to notify the frontend that the copy was successful
+    let _ = window.emit("clipboard-copied", text);
     
     Ok(())
 }
@@ -3112,6 +3344,8 @@ fn main() {
             install_mods,
             quick_organize,
             delete_mod,
+            open_in_explorer,
+            copy_to_clipboard,
             create_folder,
             get_folders,
             get_root_folder_info,

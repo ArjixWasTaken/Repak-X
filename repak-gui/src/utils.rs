@@ -15,8 +15,9 @@ static SKIN_REGEX: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 // Regex to extract just the character ID (4 digits) from paths like /Characters/1021/ or /Hero_ST/1048/
+// Also matches directory mod paths like Marvel/Characters/1065/... (without leading slash)
 static CHAR_ID_REGEX: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:Characters|Hero_ST|Hero)/(\d{4})").unwrap()
+    Regex::new(r"(?:Characters|Hero_ST|Hero)[/\\](\d{4})").unwrap()
 });
 
 // Regex to extract character ID from filenames (e.g., bnk_vo_1044001.bnk -> 1044)

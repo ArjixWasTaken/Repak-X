@@ -106,34 +106,21 @@ pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), rep
             }
         }
 
-        let uexp_backup_name = uexp_file
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|s| format!("{}.bak", s))
-            .unwrap_or_else(|| "unknown_uexp.bak".to_string());
-        fs::copy(&uexp_file, dir_path.join(uexp_backup_name))?;
-        let uasset_backup_name = uassetfile
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|s| format!("{}.bak", s))
-            .unwrap_or_else(|| "unknown_uasset.bak".to_string());
-        fs::copy(uassetfile, dir_path.join(uasset_backup_name))?;
-
+        // No backup files needed - we're working in a temp directory
         info!("Processing {}", uassetfile.to_str().unwrap_or("<invalid_path>").yellow());
         let mut rdr = BufReader::new(File::open(uassetfile.clone())?);
         let (exp_cnt, exp_offset) = fixer.read_uasset(&mut rdr)?;
         fixer.read_exports(&mut rdr, &mut sizes, &mut offsets, exp_offset, exp_cnt)?;
 
-        let backup_file = format!("{}.bak", uexp_file.to_str().unwrap_or("unknown"));
-        let backup_file_size = fs::metadata(uassetfile)?.len();
+        let uasset_file_size = fs::metadata(uassetfile)?.len();
         let tmpfile = format!("{}.temp", uexp_file.to_str().unwrap_or("unknown"));
 
         drop(rdr);
 
-        let mut r = BufReader::new(File::open(&backup_file)?);
+        let mut r = BufReader::new(File::open(&uexp_file)?);
         let mut o = BufWriter::new(File::create(&tmpfile)?);
 
-        let exp_rd = fixer.read_uexp(&mut r, backup_file_size, &backup_file, &mut o, &offsets);
+        let exp_rd = fixer.read_uexp(&mut r, uasset_file_size, uexp_file.to_str().unwrap_or("unknown"), &mut o, &offsets);
         match exp_rd {
             Ok(_) => {}
             Err(e) => match e.kind() {

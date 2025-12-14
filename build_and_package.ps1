@@ -111,32 +111,34 @@ try {
     }
     
     # ============================================
-    # Copy UAssetBridge
+    # Copy UAssetTool (unified asset tool)
     # ============================================
-    Write-Info "Copying UAssetBridge..."
-    $bridgeDir = Join-Path $targetDir "uassetbridge"
-    if (Test-Path $bridgeDir) {
-        $destBridgeDir = Join-Path $distDir "uassetbridge"
-        New-Item -ItemType Directory -Force -Path $destBridgeDir | Out-Null
-        Copy-Item -Path (Join-Path $bridgeDir "*") -Destination $destBridgeDir -Recurse -Force
-        Write-Success "Copied UAssetBridge"
+    Write-Info "Copying UAssetTool..."
+    $toolDir = Join-Path $targetDir "uassettool"
+    if (Test-Path $toolDir) {
+        $destToolDir = Join-Path $distDir "uassettool"
+        New-Item -ItemType Directory -Force -Path $destToolDir | Out-Null
+        Copy-Item -Path (Join-Path $toolDir "*") -Destination $destToolDir -Recurse -Force
+        Write-Success "Copied UAssetTool"
     } else {
-        Write-Warning "UAssetBridge not found at $bridgeDir - texture pipeline will be disabled"
+        Write-Warning "UAssetTool not found at $toolDir - asset pipeline will be disabled"
     }
     
+    # NOTE: UAssetMeshFixer has been merged into UAssetTool (in uassettool folder)
+    # No separate copy needed - UAssetTool handles all asset operations
+    
     # ============================================
-    # Copy UAssetMeshFixer
+    # Copy UE4-DDS-Tools (for texture conversion)
     # ============================================
-    Write-Info "Copying UAssetMeshFixer..."
-    $fixerDir = Join-Path $workspaceRoot "target\serialsizefixer"
-    $fixerExe = Join-Path $fixerDir "UAssetMeshFixer.exe"
-    if (Test-Path $fixerExe) {
-        $destFixerDir = Join-Path $distDir "tools"
-        New-Item -ItemType Directory -Force -Path $destFixerDir | Out-Null
-        Copy-Item -LiteralPath $fixerExe -Destination (Join-Path $destFixerDir "UAssetMeshFixer.exe") -Force
-        Write-Success "Copied UAssetMeshFixer.exe"
+    Write-Info "Copying UE4-DDS-Tools..."
+    $ddsToolsSrc = Join-Path $workspaceRoot "uasset_toolkit\tools\UE4-DDS-Tools"
+    $ddsToolsDst = Join-Path $distDir "uassettool\ue4-dds-tools"
+    if (Test-Path $ddsToolsSrc) {
+        New-Item -ItemType Directory -Force -Path $ddsToolsDst | Out-Null
+        Copy-Item -Path (Join-Path $ddsToolsSrc "*") -Destination $ddsToolsDst -Recurse -Force
+        Write-Success "Copied UE4-DDS-Tools"
     } else {
-        Write-Warning "UAssetMeshFixer.exe not found at $fixerExe"
+        Write-Warning "UE4-DDS-Tools not found at $ddsToolsSrc - texture conversion will be disabled"
     }
     
     # ============================================
@@ -151,17 +153,8 @@ try {
         Write-Warning "oo2core_9_win64.dll not found - Oodle compression may not work"
     }
     
-    # ============================================
-    # Copy Data Files
-    # ============================================
-    Write-Info "Copying data files..."
-    $dataDir = Join-Path $targetDir "data"
-    if (Test-Path $dataDir) {
-        $destDataDir = Join-Path $distDir "data"
-        New-Item -ItemType Directory -Force -Path $destDataDir | Out-Null
-        Copy-Item -Path (Join-Path $dataDir "*") -Destination $destDataDir -Recurse -Force
-        Write-Success "Copied data files"
-    }
+    # NOTE: Data folder (character_data.json) is NOT needed in distribution
+    # The app generates this file in the user's AppData/Roaming directory at runtime
     
     # ============================================
     # Copy Documentation
@@ -222,7 +215,6 @@ try {
 - ``uassetbridge/`` - Texture processing tools (optional)
 - ``tools/`` - Additional utilities
 - ``oo2core_9_win64.dll`` - Oodle compression library
-- ``data/`` - Character and game data
 
 ## Usage
 
@@ -301,10 +293,8 @@ See LICENSE-MIT and LICENSE-APACHE for details.
     
     $components = @(
         @{Name="Main Application"; Path="repak-gui.exe"},
-        @{Name="UAssetBridge"; Path="uassetbridge\UAssetBridge.exe"},
-        @{Name="Mesh Fixer"; Path="tools\UAssetMeshFixer.exe"},
-        @{Name="Oodle DLL"; Path="oo2core_9_win64.dll"},
-        @{Name="Character Data"; Path="data\character_data.json"}
+        @{Name="UAssetTool"; Path="uassettool\UAssetTool.exe"},
+        @{Name="Oodle DLL"; Path="oo2core_9_win64.dll"}
     )
     
     foreach ($component in $components) {

@@ -53,8 +53,10 @@ pub struct CharacterSkin {
 pub struct CharacterDataCache {
     /// All skins indexed by skin ID for O(1) lookup
     by_skin_id: HashMap<String, CharacterSkin>,
-    /// Character IDs indexed by character name
+    /// Character IDs indexed by character name (name -> id)
     character_ids: HashMap<String, String>,
+    /// Character names indexed by character ID (id -> name) for reverse lookup
+    character_names: HashMap<String, String>,
     /// All skins as a list
     all_skins: Vec<CharacterSkin>,
     /// Whether the cache has been initialized
@@ -66,6 +68,7 @@ impl Default for CharacterDataCache {
         Self {
             by_skin_id: HashMap::new(),
             character_ids: HashMap::new(),
+            character_names: HashMap::new(),
             all_skins: Vec::new(),
             initialized: false,
         }
@@ -78,61 +81,17 @@ static CHARACTER_CACHE: Lazy<Arc<RwLock<CharacterDataCache>>> = Lazy::new(|| {
 });
 
 // ============================================================================
-// KNOWN CHARACTER IDS (for default skin generation)
+// CHARACTER ID LOOKUP
 // ============================================================================
 
-
 /// Get character name from character ID (id -> name)
+/// Uses the dynamically loaded character_data.json for lookups
 /// Used for static mesh and audio mods that aren't skin-specific
 pub fn get_character_name_from_id(char_id: &str) -> Option<String> {
-    // Reverse lookup from ID to name
-    match char_id {
-        "1011" => Some("Hulk".to_string()),
-        "1014" => Some("Punisher".to_string()),
-        "1015" => Some("Storm".to_string()),
-        "1016" => Some("Loki".to_string()),
-        "1017" => Some("Human Torch".to_string()),
-        "1018" => Some("Doctor Strange".to_string()),
-        "1020" => Some("Mantis".to_string()),
-        "1021" => Some("Hawkeye".to_string()),
-        "1022" => Some("Captain America".to_string()),
-        "1023" => Some("Rocket Raccoon".to_string()),
-        "1024" => Some("Hela".to_string()),
-        "1025" => Some("Cloak & Dagger".to_string()),
-        "1026" => Some("Black Panther".to_string()),
-        "1027" => Some("Groot".to_string()),
-        "1028" => Some("Ultron".to_string()),
-        "1029" => Some("Magik".to_string()),
-        "1030" => Some("Moon Knight".to_string()),
-        "1031" => Some("Luna Snow".to_string()),
-        "1032" => Some("Squirrel Girl".to_string()),
-        "1033" => Some("Black Widow".to_string()),
-        "1034" => Some("Iron Man".to_string()),
-        "1035" => Some("Venom".to_string()),
-        "1036" => Some("Spider-Man".to_string()),
-        "1037" => Some("Magneto".to_string()),
-        "1038" => Some("Scarlet Witch".to_string()),
-        "1039" => Some("Thor".to_string()),
-        "1040" => Some("Mister Fantastic".to_string()),
-        "1041" => Some("Winter Soldier".to_string()),
-        "1042" => Some("Peni Parker".to_string()),
-        "1043" => Some("Star-Lord".to_string()),
-        "1044" => Some("Blade".to_string()),
-        "1045" => Some("Namor".to_string()),
-        "1046" => Some("Adam Warlock".to_string()),
-        "1047" => Some("Jeff the Landshark".to_string()),
-        "1048" => Some("Psylocke".to_string()),
-        "1049" => Some("Wolverine".to_string()),
-        "1050" => Some("Invisible Woman".to_string()),
-        "1051" => Some("The Thing".to_string()),
-        "1052" => Some("Iron Fist".to_string()),
-        "1053" => Some("Emma Frost".to_string()),
-        "1054" => Some("Phoenix".to_string()),
-        "1055" => Some("Daredevil".to_string()),
-        "1056" => Some("Angela".to_string()),
-        "1058" => Some("Gambit".to_string()),
-        _ => None,
-    }
+    ensure_cache_initialized();
+    
+    let cache = CHARACTER_CACHE.read().unwrap();
+    cache.character_names.get(char_id).cloned()
 }
 
 // ============================================================================
@@ -263,11 +222,14 @@ pub fn refresh_cache() {
     let mut cache = CHARACTER_CACHE.write().unwrap();
     cache.by_skin_id.clear();
     cache.character_ids.clear();
+    cache.character_names.clear();
     cache.all_skins.clear();
     
     for skin in &skins {
         cache.by_skin_id.insert(skin.skinid.clone(), skin.clone());
         cache.character_ids.insert(skin.name.clone(), skin.id.clone());
+        // Also populate reverse lookup (id -> name)
+        cache.character_names.insert(skin.id.clone(), skin.name.clone());
     }
     
     cache.all_skins = skins;
@@ -403,6 +365,7 @@ fn normalize_character_name(raw_name: &str) -> String {
         "daredevil" => "Daredevil".to_string(),
         "angela" => "Angela".to_string(),
         "gambit" => "Gambit".to_string(),
+        "rogue" => "Rogue".to_string(),
         _ => {
             // Fallback: title case each word
             raw_name.split_whitespace()

@@ -16,6 +16,28 @@ use dirs;
 use serde_json;
 use regex_lite::Regex;
 
+/// Recursively copy a directory and all its contents to a destination
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    if !dst.exists() {
+        fs::create_dir_all(dst)?;
+    }
+    
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        
+        if file_type.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            fs::copy(&src_path, &dst_path)?;
+        }
+    }
+    
+    Ok(())
+}
+
 pub fn normalize_mod_base_name(name: &str, min_nines: usize) -> String {
     // Regex to find existing 9s suffix
     // Looking for pattern: any characters, then underscore, then 7 or more 9s, then _P
@@ -162,12 +184,31 @@ pub fn install_mods_in_viewport(
         }
 
         if installable_mod.is_dir {
+            // Copy source directory to temp dir to avoid modifying original files
+            let temp_dir = match tempfile::tempdir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    error!("Failed to create temp directory: {}", e);
+                    continue;
+                }
+            };
+            let temp_path = temp_dir.path().to_path_buf();
+            
+            // Copy all files from source to temp
+            let source_path = PathBuf::from(&installable_mod.mod_path);
+            if let Err(e) = copy_dir_recursive(&source_path, &temp_path) {
+                error!("Failed to copy mod files to temp directory: {}", e);
+                continue;
+            }
+            info!("Copied mod files to temp directory for processing");
+            
             let res = convert_to_iostore_directory(
                 installable_mod,
                 mod_directory.to_path_buf(),
-                PathBuf::from(&installable_mod.mod_path),
+                temp_path,
                 installed_mods_ptr,
             );
+            // temp_dir is automatically cleaned up when it goes out of scope
             if let Err(e) = res {
                 error!("Failed to create repak from pak: {}", e);
             } else {

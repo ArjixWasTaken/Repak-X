@@ -1,7 +1,7 @@
 use crate::install_mod::install_mod_logic::patch_meshes::mesh_patch;
 use crate::install_mod::{InstallableMod, AES_KEY};
 use crate::utils::collect_files;
-use log::debug;
+use log::{debug, info, error};
 use path_clean::PathClean;
 use path_slash::PathExt;
 use rayon::iter::IntoParallelRefIterator;
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicI32;
 use tempfile::tempdir;
 
-use super::iotoc::convert_to_iostore_directory;
+use super::iotoc::{convert_to_iostore_directory, process_texture_files};
 
 pub fn extract_pak_to_dir(pak: &InstallableMod, install_dir: PathBuf) -> Result<(), repak::Error> {
     let pak_reader = pak.clone().reader.clone().unwrap();
@@ -113,6 +113,59 @@ pub fn repak_dir(
 
     if pak.fix_mesh {
         mesh_patch(&mut paths, &to_pak_dir.to_path_buf())?;
+    }
+
+    // Process textures and track which ones had mipmaps removed
+    let processed_textures = if pak.fix_textures {
+        match process_texture_files(&paths) {
+            Ok(textures) => textures,
+            Err(e) => {
+                error!("Failed to process texture files: {}", e);
+                std::collections::HashSet::new()
+            }
+        }
+    } else {
+        std::collections::HashSet::new()
+    };
+
+    // Filter out temporary/backup files and .ubulk files for NoMipmaps textures
+    let original_count = paths.len();
+    paths.retain(|p| {
+        let file_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
+        
+        // Check if this is a .ubulk file for a processed NoMipmaps texture
+        let is_processed_ubulk = if ext == "ubulk" {
+            if let Some(stem) = p.file_stem() {
+                let texture_base = stem.to_string_lossy().to_string();
+                if processed_textures.contains(&texture_base) {
+                    info!("Excluding .ubulk from regular PAK for NoMipmaps texture: {}", file_name);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        
+        // Exclude backup files, temp files, and .ubulk for NoMipmaps textures
+        let should_exclude = ext == "bak" 
+            || ext == "temp" 
+            || file_name == "patched_files"
+            || is_processed_ubulk;
+        
+        if should_exclude {
+            debug!("Excluding from PAK: {}", p.display());
+        }
+        
+        !should_exclude
+    });
+    
+    if paths.len() != original_count {
+        info!("Filtered {} files from PAK (temp/backup/.ubulk)", original_count - paths.len());
     }
 
     paths.sort();

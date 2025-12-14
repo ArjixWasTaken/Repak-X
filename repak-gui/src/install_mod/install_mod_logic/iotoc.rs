@@ -2,7 +2,7 @@
 use crate::install_mod::install_mod_logic::pak_files::repak_dir;
 use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::{InstallableMod, AES_KEY};
-use crate::uasset_api_integration::process_texture_with_uasset_api;
+use crate::uasset_api_integration::convert_texture_to_inline;
 use crate::utils::collect_files;
 use rayon::iter::IntoParallelRefIterator;
 use rayon::iter::ParallelIterator;
@@ -97,23 +97,84 @@ pub fn convert_to_iostore_directory(
         patch_meshes::mesh_patch(&mut paths, &to_pak_dir.to_path_buf())?;
     }
 
-    if pak.fix_textures {
-        if let Err(e) = process_texture_files(&paths) {
-            error!("Failed to process texture files: {}", e);
+    // Process textures using UAssetAPI to convert them to inline format
+    // This modifies the .uasset to clear DataResources and embeds mip data in export.Extras
+    let processed_textures: std::collections::HashSet<String> = if pak.fix_textures {
+        info!("Texture fix enabled for mod: {}", pak.mod_name);
+        info!("Processing {} files for texture conversion using UAssetAPI", paths.len());
+        
+        let mut processed = std::collections::HashSet::new();
+        
+        // Find all .uasset files that might be textures with .ubulk
+        for path in paths.iter() {
+            if path.extension() == Some(std::ffi::OsStr::new("uasset")) {
+                let file_name = path.file_stem()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("");
+                
+                // Check if there's a corresponding .ubulk file (indicates FromTextureGroup texture)
+                let ubulk_path = path.with_extension("ubulk");
+                if ubulk_path.exists() {
+                    info!("Found texture with .ubulk: {}", file_name);
+                    
+                    // Use UAssetAPI to convert the texture to inline format
+                    // This will read the .ubulk and embed the first mip in the export's Extras
+                    match convert_texture_to_inline(path) {
+                        Ok(true) => {
+                            info!("Successfully converted texture to inline: {}", file_name);
+                            processed.insert(file_name.to_string());
+                            // Note: UAssetBridge now handles the .ubulk data embedding
+                            // We still need to exclude the .ubulk from IoStore since data is now inline
+                        }
+                        Ok(false) => {
+                            info!("Texture conversion returned false for: {}", file_name);
+                        }
+                        Err(e) => {
+                            error!("Failed to convert texture {}: {}", file_name, e);
+                        }
+                    }
+                }
+            }
         }
-    }
+        
+        info!("Successfully processed {} textures", processed.len());
+        processed
+    } else {
+        std::collections::HashSet::new()
+    };
 
     // Filter out temporary/backup files that should NOT be included in the IoStore package
-    // This includes: .bak files (mesh patch backups), .temp files, patched_files cache
+    // This includes: .bak files (mesh patch backups), .temp files, patched_files cache,
+    // and .ubulk files for textures that have been processed with NoMipmaps
     let original_count = paths.len();
     paths.retain(|p| {
         let file_name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
         let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("");
         
-        // Exclude backup files, temp files, and the patched_files cache
+        // Check if this is a .ubulk file for a processed NoMipmaps texture
+        // NOTE: Disabled for now - only exclude .ubulk if we're 100% sure conversion worked
+        // Otherwise the texture will be broken (missing bulk data)
+        let is_processed_ubulk = if ext == "ubulk" && !processed_textures.is_empty() {
+            if let Some(stem) = p.file_stem() {
+                let texture_base = stem.to_string_lossy().to_string();
+                if processed_textures.contains(&texture_base) {
+                    info!("Excluding .ubulk from packing for NoMipmaps texture: {}", file_name);
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        
+        // Exclude backup files, temp files, patched_files cache, and .ubulk for NoMipmaps textures
         let should_exclude = ext == "bak" 
             || ext == "temp" 
-            || file_name == "patched_files";
+            || file_name == "patched_files"
+            || is_processed_ubulk;
         
         if should_exclude {
             debug!("Excluding from IoStore: {}", p.display());
@@ -123,12 +184,23 @@ pub fn convert_to_iostore_directory(
     });
     
     if paths.len() != original_count {
-        info!("Filtered {} temporary/backup files from IoStore conversion", original_count - paths.len());
+        info!("Filtered {} files from IoStore conversion (temp/backup/.ubulk)", original_count - paths.len());
+    }
+
+    // Log which files are being converted to IoStore
+    info!("Converting {} files to IoStore", paths.len());
+    for path in paths.iter().take(10) {
+        if let Some(filename) = path.file_name() {
+            let filename_str = filename.to_string_lossy();
+            if filename_str.ends_with(".uexp") && processed_textures.iter().any(|t| filename_str.contains(t)) {
+                info!("  Including converted texture: {}", filename_str);
+            }
+        }
     }
 
     let action = ActionToZen::new(
         to_pak_dir.clone(),
-        mod_dir.join(utoc_name),
+        mod_dir.join(utoc_name.clone()),
         EngineVersion::UE5_3,
     );
     let mut config = Config {
@@ -143,7 +215,32 @@ pub fn convert_to_iostore_directory(
     config.aes_keys.insert(FGuid::default(), aes_toc.clone());
     let config = Arc::new(config);
 
+    // Log file sizes before IoStore conversion
+    if !processed_textures.is_empty() {
+        info!("Checking converted texture files before IoStore conversion:");
+        for texture_name in processed_textures.iter().take(5) {
+            for path in paths.iter() {
+                if let Some(filename) = path.file_name() {
+                    if filename.to_string_lossy().contains(texture_name) && path.extension() == Some(std::ffi::OsStr::new("uexp")) {
+                        if let Ok(metadata) = std::fs::metadata(path) {
+                            info!("  {} - size: {} bytes", filename.to_string_lossy(), metadata.len());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     action_to_zen(action, config).expect("Failed to convert to zen");
+    
+    // Log IoStore output
+    let ucas_path = mod_dir.join(pak.mod_name.clone()).with_extension("ucas");
+    let utoc_path = mod_dir.join(utoc_name);
+    if ucas_path.exists() && utoc_path.exists() {
+        let ucas_size = std::fs::metadata(&ucas_path).map(|m| m.len()).unwrap_or(0);
+        let utoc_size = std::fs::metadata(&utoc_path).map(|m| m.len()).unwrap_or(0);
+        info!("IoStore conversion complete - ucas: {} bytes, utoc: {} bytes", ucas_size, utoc_size);
+    }
 
     // NOW WE CREATE THE FAKE PAK FILE WITH THE CONTENTS BEING A TEXT FILE LISTING ALL CHUNKNAMES
 
@@ -192,60 +289,24 @@ pub fn convert_to_iostore_directory(
     // now generate the fake pak file
 }
 
-/// Process texture files to set MipGenSettings to NoMipmaps
-pub fn process_texture_files(paths: &Vec<PathBuf>) -> Result<(), Box<dyn std::error::Error>> {
-    // Filter for .uasset files that are in a "texture" related folder
-    let uasset_files: Vec<_> = paths
-        .iter()
-        .filter(|p| {
-            // Must be a .uasset file
-            if p.extension().and_then(|ext| ext.to_str()) != Some("uasset") {
-                return false;
-            }
-
-            // Check if any parent folder contains "texture" (case-insensitive)
-            let path_str = p.to_string_lossy().to_lowercase();
-            
-            // Check for "texture" in the path (simple substring check is robust enough and covers "Textures", "texture", "MyTextures", etc.)
-            // This covers both folder names and file names, but since we're looking for folder structure mostly, this is a good heuristic.
-            // User requested: "detect if there is a folder in the pak directories that contains the word 'texture'"
-            if path_str.contains("texture") {
-                return true;
-            }
-            
-            false
-        })
-        .collect();
-
-    debug!("Found {} potential texture files (in 'texture' folders) to check", uasset_files.len());
-
-    for uasset_file in &uasset_files {
-        // Create backups
-        if let Err(e) = std::fs::copy(uasset_file, format!("{}.bak", uasset_file.display())) {
-            warn!("Failed to create backup for {}: {}", uasset_file.display(), e);
-        }
-
-        // Use UAssetAPI exclusively for MipGenSettings -> NoMipmaps
-        match process_texture_with_uasset_api(uasset_file) {
-            Ok(true) => {
-                debug!("Successfully processed texture with UAssetAPI (NoMipmaps): {:?}", uasset_file);
-            }
-            Ok(false) => {
-                // Not a texture or couldn't be processed
-                // debug!("File is not a texture or skipped: {:?}", uasset_file);
-            }
-            Err(e) => {
-                error!(
-                    "UAssetAPI texture processing error for {:?}: {}. Mipmaps were NOT modified.",
-                    uasset_file,
-                    e
-                );
-            }
-        }
-    }
-    
-    Ok(())
+/// Process texture files for NoMipmaps fix.
+/// NOTE: Texture conversion is currently disabled - needs complete rewrite.
+/// Returns an empty set since no textures are processed.
+#[allow(dead_code)]
+pub fn process_texture_files(_paths: &Vec<PathBuf>) -> Result<std::collections::HashSet<String>, Box<dyn std::error::Error>> {
+    // Texture conversion disabled - return empty set
+    info!("Texture conversion is currently disabled - needs complete rewrite");
+    Ok(std::collections::HashSet::new())
 }
+
+// NOTE: All texture conversion functions removed - needs complete rewrite with different approach
+// The previous implementation attempted manual binary patching which was unreliable
+// Future implementation should consider:
+// 1. Using Unreal Engine's UAT for proper cooking (requires UE installation)
+// 2. Or finding a more robust binary format understanding
+// 3. Or requiring mod creators to export textures with NoMipMaps setting
+
+
 
 /// Asset type detection result from UAssetAPI tool
 #[derive(Debug, Deserialize, Serialize)]
@@ -265,47 +326,44 @@ struct SerializeSizeFixResult {
     asset_type: Option<String>,
 }
 
-/// Find the UAssetMeshFixer tool - searches multiple locations
-fn find_static_mesh_fixer_tool() -> Result<PathBuf, Box<dyn std::error::Error>> {
+/// Find the UAssetTool - searches multiple locations
+fn find_uasset_tool() -> Result<PathBuf, Box<dyn std::error::Error>> {
     // Try to find the tool relative to the executable first
     if let Ok(exe_path) = std::env::current_exe() {
         if let Some(exe_dir) = exe_path.parent() {
-            // Check next to executable (for release builds)
-            let next_to_exe = exe_dir.join("UAssetMeshFixer.exe");
-            if next_to_exe.exists() {
-                info!("   🔧 Found tool next to exe: {}", next_to_exe.display());
-                return Ok(next_to_exe);
+            // Check in uassettool subdirectory (standard location from build.rs)
+            let in_uassettool = exe_dir.join("uassettool").join("UAssetTool.exe");
+            if in_uassettool.exists() {
+                info!("   🔧 Found UAssetTool: {}", in_uassettool.display());
+                return Ok(in_uassettool);
             }
             
-            // Check in tools subdirectory
-            let in_tools = exe_dir.join("tools").join("UAssetMeshFixer.exe");
-            if in_tools.exists() {
-                info!("   🔧 Found tool in tools dir: {}", in_tools.display());
-                return Ok(in_tools);
+            // Check next to executable (for release builds)
+            let next_to_exe = exe_dir.join("UAssetTool.exe");
+            if next_to_exe.exists() {
+                info!("   🔧 Found UAssetTool next to exe: {}", next_to_exe.display());
+                return Ok(next_to_exe);
             }
         }
     }
     
     // Relative paths for development (from workspace root during tauri dev)
     let relative_paths = [
-        // From workspace root (tauri dev runs from here)
-        "Repak_Gui-Revamped-TauriUpdate/UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/UAssetMeshFixer.exe",
-        "Repak_Gui-Revamped-TauriUpdate/UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/UAssetMeshFixer.exe",
+        // From target directory (built by uasset_app)
+        "target/release/uassettool/UAssetTool.exe",
+        "target/debug/uassettool/UAssetTool.exe",
+        // From workspace root
+        "Repak_Gui-Revamped-TauriUpdate/uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/publish/UAssetTool.exe",
+        "Repak_Gui-Revamped-TauriUpdate/uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/UAssetTool.exe",
         // From repak-gui directory
-        "../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/UAssetMeshFixer.exe",
-        "../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/UAssetMeshFixer.exe",
-        // Legacy paths
-        "../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/UAssetMeshFixer.exe",
-        "../../UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/UAssetMeshFixer.exe",
-        // UAssetAPI in same directory structure
-        "UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/publish/UAssetMeshFixer.exe",
-        "UAssetAPI/StaticMeshSerializeSizeFixer/bin/Release/net8.0/win-x64/UAssetMeshFixer.exe",
+        "../uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/publish/UAssetTool.exe",
+        "../uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/UAssetTool.exe",
     ];
     
     for path in &relative_paths {
         let p = Path::new(path);
         if p.exists() {
-            info!("   🔧 Found tool at: {}", path);
+            info!("   🔧 Found UAssetTool at: {}", path);
             return Ok(p.to_path_buf());
         }
     }
@@ -315,13 +373,13 @@ fn find_static_mesh_fixer_tool() -> Result<PathBuf, Box<dyn std::error::Error>> 
         warn!("   Current working directory: {}", cwd.display());
     }
     
-    Err("UAssetMeshFixer.exe not found in any search path. Make sure it's built with 'dotnet publish'.".into())
+    Err("UAssetTool.exe not found in any search path. Make sure it's built with 'dotnet publish'.".into())
 }
 
 /// Detect asset type using UAssetAPI (no heuristics!)
 fn detect_asset_type_with_uasset_api(uasset_path: &Path, usmap_path: Option<&str>) -> Result<String, Box<dyn std::error::Error>> {
     // Get the tool path - try multiple locations
-    let tool_path = find_static_mesh_fixer_tool()?;
+    let tool_path = find_uasset_tool()?;
 
     let mut cmd = Command::new(&tool_path);
     
@@ -368,7 +426,7 @@ fn detect_asset_type_with_uasset_api(uasset_path: &Path, usmap_path: Option<&str
 
 /// Fix SerializeSize for Static Meshes using UAssetAPI (calculation only) + binary patching
 fn fix_static_mesh_serializesize(uasset_path: &Path, usmap_path: Option<&str>) -> Result<usize, Box<dyn std::error::Error>> {
-    let tool_path = find_static_mesh_fixer_tool()?;
+    let tool_path = find_uasset_tool()?;
 
     let mut cmd = Command::new(&tool_path);
     

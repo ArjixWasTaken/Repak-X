@@ -1,4 +1,4 @@
-//! UAsset detection using UAssetAPI (via UAssetBridge)
+//! UAsset detection using UAssetAPI (via UAssetTool)
 //! 
 //! All detection is done via UAssetAPI - no heuristic fallbacks.
 //! If UAssetAPI fails (e.g., missing USMAP), detection returns false.
@@ -61,9 +61,21 @@ pub async fn detect_mesh_files_async(mod_contents: &[String]) -> bool {
 /// but only returns true if there's also a .ubulk file (bulk texture data)
 /// Async version for use in Tauri commands
 pub async fn detect_texture_files_async(mod_contents: &[String]) -> bool {
+    info!("[Detection] Texture detection received {} files to check", mod_contents.len());
+    
+    // Log a sample of files to see what we're getting
+    let ubulk_files: Vec<&String> = mod_contents.iter()
+        .filter(|f| f.to_lowercase().ends_with(".ubulk"))
+        .collect();
+    
+    info!("[Detection] Found {} .ubulk files in input", ubulk_files.len());
+    for (i, f) in ubulk_files.iter().take(3).enumerate() {
+        info!("[Detection] .ubulk sample {}: {}", i + 1, f);
+    }
+    
     // First check: do we have any .ubulk files at all?
     // If not, no texture fix is needed regardless of Texture2D presence
-    let has_ubulk = mod_contents.iter().any(|f| f.to_lowercase().ends_with(".ubulk"));
+    let has_ubulk = !ubulk_files.is_empty();
     if !has_ubulk {
         info!("[Detection] No .ubulk files found - texture fix NOT needed");
         return false;

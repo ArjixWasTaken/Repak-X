@@ -383,6 +383,107 @@ pub fn action_manifest(args: ActionManifest, config: Arc<Config>) -> Result<(Pac
     return Ok((manifest));
 }
 
+/// Check if an IoStore container (.utoc/.ucas) uses compression.
+/// Returns true if the container has any compression methods registered (e.g., Oodle, Zlib, etc.)
+/// and at least one block is actually compressed.
+/// Returns false if the container is uncompressed.
+pub fn is_iostore_compressed<P: AsRef<Path>>(utoc_path: P) -> Result<bool> {
+    let path = utoc_path.as_ref();
+    
+    // Read just the TOC header to check compression info
+    let file = fs::File::open(path)?;
+    let mut reader = BufReader::new(file);
+    
+    // Parse the TOC header
+    let header: FIoStoreTocHeader = reader.de()?;
+    
+    // Check if any compression methods are registered
+    if header.compression_method_name_count == 0 {
+        return Ok(false);
+    }
+    
+    // Read compression blocks to see if any are actually compressed
+    // Skip to compression blocks section
+    // Layout: chunks, chunk_offsets, hash_map, then compression_blocks
+    let chunks_size = header.toc_entry_count as usize * 12; // FIoChunkId size
+    let offsets_size = header.toc_entry_count as usize * 10; // FIoOffsetAndLength size
+    let hash_seeds_size = header.toc_chunk_perfect_hash_seeds_count as usize * 4;
+    let hash_overflow_size = header.toc_chunks_without_perfect_hash_count as usize * 4;
+    
+    let skip_bytes = chunks_size + offsets_size + hash_seeds_size + hash_overflow_size;
+    std::io::copy(&mut reader.by_ref().take(skip_bytes as u64), &mut std::io::sink())?;
+    
+    // Read compression blocks
+    let block_count = header.toc_compressed_block_entry_count as usize;
+    if block_count == 0 {
+        return Ok(false);
+    }
+    
+    // Check first few blocks to see if any use compression (method_index > 0)
+    let check_count = std::cmp::min(block_count, 100); // Check up to 100 blocks
+    for _ in 0..check_count {
+        let mut block_data = [0u8; 12];
+        reader.read_exact(&mut block_data)?;
+        let compression_method_index = block_data[11];
+        if compression_method_index > 0 {
+            return Ok(true); // Found a compressed block
+        }
+    }
+    
+    Ok(false) // No compressed blocks found
+}
+
+/// Recompress an IoStore container by reading all chunks and writing them back with Oodle compression.
+/// This is useful for mods that have uncompressed .ucas files.
+pub fn recompress_iostore<P: AsRef<Path>>(utoc_path: P, config: Arc<Config>) -> Result<PathBuf> {
+    let utoc_path = utoc_path.as_ref();
+    let iostore = iostore::open(utoc_path, config.clone())?;
+    
+    let toc_version = iostore.container_file_version()
+        .context("Failed to get container version")?;
+    let container_header_version = iostore.container_header_version();
+    
+    // Create temp output path
+    let temp_utoc = utoc_path.with_extension("utoc.tmp");
+    
+    let mount_point = UEPath::new("../../../");
+    
+    let mut writer = IoStoreWriter::new(
+        &temp_utoc,
+        toc_version,
+        container_header_version,
+        mount_point.into(),
+    )?;
+    
+    // Copy all chunks to the new container (writer will compress them)
+    for chunk_info in iostore.chunks() {
+        let chunk_id = chunk_info.id();
+        let data = chunk_info.read()?;
+        let path = chunk_info.path().map(|p| UEPathBuf::from(p));
+        
+        writer.write_chunk(chunk_id, path.as_ref().map(|p| p.as_ref()), &data)?;
+    }
+    
+    writer.finalize()?;
+    
+    // Replace original files with compressed versions
+    let original_ucas = utoc_path.with_extension("ucas");
+    let temp_ucas = temp_utoc.with_extension("ucas");
+    
+    // Backup and replace
+    fs::rename(utoc_path, utoc_path.with_extension("utoc.bak"))?;
+    fs::rename(&original_ucas, original_ucas.with_extension("ucas.bak"))?;
+    
+    fs::rename(&temp_utoc, utoc_path)?;
+    fs::rename(&temp_ucas, &original_ucas)?;
+    
+    // Remove backups
+    fs::remove_file(utoc_path.with_extension("utoc.bak")).ok();
+    fs::remove_file(original_ucas.with_extension("ucas.bak")).ok();
+    
+    Ok(utoc_path.to_path_buf())
+}
+
 fn action_info(args: ActionInfo, config: Arc<Config>) -> Result<()> {
     let iostore = iostore::open(args.path, config)?;
     iostore.print_info(0);

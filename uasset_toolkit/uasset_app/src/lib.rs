@@ -38,6 +38,11 @@ pub enum UAssetRequest {
     BatchDetectTexture { file_paths: Vec<String> },
     #[serde(rename = "batch_detect_blueprint")]
     BatchDetectBlueprint { file_paths: Vec<String> },
+    // Texture conversion using UE4-DDS-Tools (export -> re-inject with no_mipmaps)
+    #[serde(rename = "convert_texture")]
+    ConvertTexture { file_path: String },
+    #[serde(rename = "strip_mipmaps")]
+    StripMipmaps { file_path: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -70,7 +75,7 @@ struct ChildProcess {
 }
 
 pub struct UAssetToolkit {
-    bridge_path: String,
+    tool_path: String,
     process: Mutex<Option<ChildProcess>>,
 }
 
@@ -78,39 +83,39 @@ impl UAssetToolkit {
     /// Create a new UAssetToolkit instance
     /// 
     /// # Arguments
-    /// * `bridge_path` - Path to the UAssetBridge executable. If None, will try to find it in target/uassetbridge/
-    pub fn new(bridge_path: Option<String>) -> Result<Self> {
-        let bridge_path = match bridge_path {
+    /// * `tool_path` - Path to the UAssetTool executable. If None, will try to find it in target/uassettool/
+    pub fn new(tool_path: Option<String>) -> Result<Self> {
+        let tool_path = match tool_path {
             Some(path) => path,
             None => {
-                // Try to find the bridge in the expected location
+                // Try to find the tool in the expected location
                 let exe_path = std::env::current_exe()?;
                 let exe_dir = exe_path.parent().context("Failed to get executable directory")?;
-                let bridge_path = exe_dir.join("uassetbridge").join("UAssetBridge.exe");
+                let tool_path = exe_dir.join("uassettool").join("UAssetTool.exe");
                 
-                if !bridge_path.exists() {
+                if !tool_path.exists() {
                     // Try relative to workspace
-                    let workspace_bridge = Path::new("target/uassetbridge/UAssetBridge.exe");
-                    if workspace_bridge.exists() {
-                        workspace_bridge.to_string_lossy().to_string()
+                    let workspace_tool = Path::new("target/uassettool/UAssetTool.exe");
+                    if workspace_tool.exists() {
+                        workspace_tool.to_string_lossy().to_string()
                     } else {
                         // Try looking in the source tools folder as fallback for dev
-                        let dev_bridge = Path::new("tools/UAssetBridge/bin/Debug/net8.0/win-x64/UAssetBridge.exe");
-                         if dev_bridge.exists() {
-                            dev_bridge.to_string_lossy().to_string()
+                        let dev_tool = Path::new("uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/publish/UAssetTool.exe");
+                         if dev_tool.exists() {
+                            dev_tool.to_string_lossy().to_string()
                         } else {
                              // Default assumption
-                             bridge_path.to_string_lossy().to_string()
+                             tool_path.to_string_lossy().to_string()
                         }
                     }
                 } else {
-                    bridge_path.to_string_lossy().to_string()
+                    tool_path.to_string_lossy().to_string()
                 }
             }
         };
 
         Ok(Self { 
-            bridge_path,
+            tool_path,
             process: Mutex::new(None),
         })
     }
@@ -119,11 +124,11 @@ impl UAssetToolkit {
         let mut process_guard = self.process.lock().await;
 
         if process_guard.is_none() {
-             if !Path::new(&self.bridge_path).exists() {
-                 anyhow::bail!("UAssetBridge executable not found at: {}", self.bridge_path);
+             if !Path::new(&self.tool_path).exists() {
+                 anyhow::bail!("UAssetTool executable not found at: {}", self.tool_path);
              }
 
-            let mut cmd = AsyncCommand::new(&self.bridge_path);
+            let mut cmd = AsyncCommand::new(&self.tool_path);
             cmd.stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped());
@@ -358,6 +363,39 @@ impl UAssetToolkit {
         }
     }
 
+    /// Convert texture using UE4-DDS-Tools (export -> re-inject with no_mipmaps)
+    /// This is the safest texture conversion method that:
+    /// 1. Exports the texture to DDS
+    /// 2. Re-injects with --no_mipmaps flag
+    pub async fn convert_texture(&self, file_path: &str) -> Result<bool> {
+        let request = UAssetRequest::ConvertTexture {
+            file_path: file_path.to_string(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to convert texture: {}", response.message);
+        }
+        
+        Ok(true)
+    }
+
+    /// Strip mipmaps from a texture using UE4-DDS-Tools remove_mipmaps mode
+    pub async fn strip_mipmaps(&self, file_path: &str) -> Result<bool> {
+        let request = UAssetRequest::StripMipmaps {
+            file_path: file_path.to_string(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to strip mipmaps: {}", response.message);
+        }
+        
+        Ok(true)
+    }
+
     /// Batch detect skeletal meshes - sends all paths at once, returns true if any match
     pub async fn batch_detect_skeletal_mesh(&self, file_paths: &[String]) -> Result<bool> {
         let request = UAssetRequest::BatchDetectSkeletalMesh {
@@ -516,5 +554,15 @@ impl UAssetToolkitSync {
 
     pub fn get_mesh_info(&self, file_path: &str) -> Result<MeshInfo> {
         self.block_on(self.toolkit.get_mesh_info(file_path))
+    }
+
+    /// Convert texture using UE4-DDS-Tools (export -> re-inject with no_mipmaps)
+    pub fn convert_texture(&self, file_path: &str) -> Result<bool> {
+        self.block_on(self.toolkit.convert_texture(file_path))
+    }
+
+    /// Strip mipmaps from a texture using UE4-DDS-Tools
+    pub fn strip_mipmaps(&self, file_path: &str) -> Result<bool> {
+        self.block_on(self.toolkit.strip_mipmaps(file_path))
     }
 }

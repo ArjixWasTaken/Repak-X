@@ -86,65 +86,48 @@ try {
     # ============================================
     Write-Step "[2/5] Building C# Projects"
 
-    # Build UAssetBridge
-    Write-Info "Building UAssetBridge.exe..."
-    $bridgeProject = Join-Path $workspaceRoot "uasset_toolkit\tools\UAssetBridge\UAssetBridge.csproj"
-    if (Test-Path $bridgeProject) {
-        $bridgeOutput = Join-Path $workspaceRoot "target\uassetbridge"
-        New-Item -ItemType Directory -Force -Path $bridgeOutput | Out-Null
+    # Build UAssetTool (unified asset tool - replaces UAssetBridge and UAssetMeshFixer)
+    Write-Info "Building UAssetTool.exe..."
+    $toolProject = Join-Path $workspaceRoot "uasset_toolkit\tools\UAssetTool\UAssetTool.csproj"
+    if (Test-Path $toolProject) {
+        $toolOutput = Join-Path $workspaceRoot "target\uassettool"
+        New-Item -ItemType Directory -Force -Path $toolOutput | Out-Null
         
-        & dotnet publish $bridgeProject `
+        & dotnet publish $toolProject `
             -c Release `
             -r win-x64 `
             --self-contained false `
-            -o $bridgeOutput
+            -o $toolOutput
         
         if ($LASTEXITCODE -ne 0) {
-            Write-Error-Custom "UAssetBridge build failed!"
+            Write-Error-Custom "UAssetTool build failed!"
             exit 1
         }
         
-        $bridgeExe = Join-Path $bridgeOutput "UAssetBridge.exe"
-        if (Test-Path $bridgeExe) {
-            Write-Success "UAssetBridge.exe built successfully"
-            Write-Info "Location: $bridgeExe"
+        $toolExe = Join-Path $toolOutput "UAssetTool.exe"
+        if (Test-Path $toolExe) {
+            Write-Success "UAssetTool.exe built successfully"
+            Write-Info "Location: $toolExe"
         } else {
-            Write-Error-Custom "UAssetBridge.exe not found after build!"
+            Write-Error-Custom "UAssetTool.exe not found after build!"
             exit 1
+        }
+        
+        # Copy UE4-DDS-Tools to output
+        $ddsToolsSrc = Join-Path $workspaceRoot "uasset_toolkit\tools\UE4-DDS-Tools"
+        $ddsToolsDst = Join-Path $toolOutput "ue4-dds-tools"
+        if (Test-Path $ddsToolsSrc) {
+            Write-Info "Copying UE4-DDS-Tools..."
+            if (Test-Path $ddsToolsDst) {
+                Remove-Item -Recurse -Force $ddsToolsDst
+            }
+            Copy-Item -Recurse -Force $ddsToolsSrc $ddsToolsDst
+            Write-Success "UE4-DDS-Tools copied"
+        } else {
+            Write-Warning "UE4-DDS-Tools not found at $ddsToolsSrc"
         }
     } else {
-        Write-Warning "UAssetBridge project not found at $bridgeProject"
-    }
-
-    # Build UAssetMeshFixer
-    Write-Info "Building UAssetMeshFixer.exe..."
-    $fixerProject = Join-Path $workspaceRoot "UAssetAPI\StaticMeshSerializeSizeFixer\UAssetMeshFixer.csproj"
-    if (Test-Path $fixerProject) {
-        $fixerOutput = Join-Path $workspaceRoot "target\serialsizefixer"
-        New-Item -ItemType Directory -Force -Path $fixerOutput | Out-Null
-        
-        & dotnet publish $fixerProject `
-            -c Release `
-            -r win-x64 `
-            --self-contained true `
-            -p:PublishSingleFile=true `
-            -o $fixerOutput
-        
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error-Custom "StaticMeshSerializeSizeFixer build failed!"
-            exit 1
-        }
-        
-        $fixerExe = Join-Path $fixerOutput "UAssetMeshFixer.exe"
-        if (Test-Path $fixerExe) {
-            Write-Success "UAssetMeshFixer.exe built successfully"
-            Write-Info "Location: $fixerExe"
-        } else {
-            Write-Error-Custom "UAssetMeshFixer.exe not found after build!"
-            exit 1
-        }
-    } else {
-        Write-Warning "StaticMeshSerializeSizeFixer project not found at $fixerProject"
+        Write-Warning "UAssetTool project not found at $toolProject"
     }
 
     # ============================================
@@ -220,8 +203,7 @@ try {
     
     $profileDir = if ($Configuration -eq "release") { "release" } else { "debug" }
     $exePath = Join-Path $workspaceRoot "target\$profileDir\repak-gui.exe"
-    $bridgePath = Join-Path $workspaceRoot "target\$profileDir\uassetbridge\UAssetBridge.exe"
-    $fixerPath = Join-Path $workspaceRoot "target\serialsizefixer\UAssetMeshFixer.exe"
+    $toolPath = Join-Path $workspaceRoot "target\$profileDir\uassettool\UAssetTool.exe"
     
     Write-Host ""
     Write-Host "Built Artifacts:" -ForegroundColor Cyan
@@ -233,16 +215,10 @@ try {
         Write-Warning "Main Application not found at: $exePath"
     }
     
-    if (Test-Path $bridgePath) {
-        Write-Success "UAssetBridge: $bridgePath"
+    if (Test-Path $toolPath) {
+        Write-Success "UAssetTool: $toolPath"
     } else {
-        Write-Warning "UAssetBridge not found at: $bridgePath"
-    }
-    
-    if (Test-Path $fixerPath) {
-        Write-Success "SerializeSizeFixer: $fixerPath"
-    } else {
-        Write-Warning "SerializeSizeFixer not found at: $fixerPath"
+        Write-Warning "UAssetTool not found at: $toolPath"
     }
     
     Write-Host ""
