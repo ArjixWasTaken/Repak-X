@@ -1,9 +1,13 @@
 name: Build and Release
+concurrency:
+  group: ${{ github.ref }}
+  cancel-in-progress: true
 
 on:
   push:
     branches:
       - main  # Triggers on push to main branch
+    # The job will only run if the commit message contains the keyword '[run-ci]'
   workflow_dispatch:  # Allows manual trigger from GitHub Actions tab
 
 env:
@@ -14,6 +18,7 @@ env:
 
 jobs:
   build-and-release:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[run-ci]')
     runs-on: windows-latest
     
     steps:
@@ -38,6 +43,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+
+      - name: Cache Node.js modules
+        uses: actions/cache@v4
+        with:
+          path: repak-gui/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('repak-gui/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
 
       - name: Install Frontend Dependencies
         working-directory: repak-gui
