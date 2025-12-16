@@ -10,14 +10,20 @@ git add "**/*.rs"
 git add "**/Cargo.toml"
 git add "**/Cargo.lock"
 
-# 2. Add Root Configuration and Scripts
+# 2. Add C# Source Files (UAssetAPI and UAssetTool)
+Write-Host "Staging C# files (*.cs, *.csproj, *.sln)..."
+git add "**/*.cs"
+git add "**/*.csproj"
+git add "**/*.sln"
+
+# 3. Add Root Configuration and Scripts
 Write-Host "Staging scripts and docs (*.bat, *.ps1, *.md)..."
 git add "*.bat"
 git add "*.ps1"
 git add "*.md"
 git add ".gitignore"
 
-# 3. Check if anything was staged
+# 4. Check if anything was staged
 $status = git status --porcelain
 if (-not $status) {
     Write-Host "No backend changes detected to commit." -ForegroundColor Yellow
@@ -26,11 +32,11 @@ if (-not $status) {
     exit
 }
 
-# 4. Commit
+# 5. Commit
 Write-Host "Committing: $Message" -ForegroundColor Green
 git commit -m "$Message"
 
-# 5. Push
+# 6. Push
 Write-Host "Pushing to origin/main..." -ForegroundColor Cyan
 git push
 

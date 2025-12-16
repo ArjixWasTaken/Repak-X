@@ -113,24 +113,9 @@ fn main() {
             println!("cargo:warning=UAssetTool.exe not found. To enable asset pipeline, build it via: 'dotnet publish uasset_toolkit/tools/UAssetTool -c Release -r win-x64 --self-contained false'");
         }
 
-        // 3) Copy oo2core_9_win64.dll to the same directory as the executable
-        //    Required for repak (oodle compression) to work
-        let dll_name = "oo2core_9_win64.dll";
-        let dll_src = workspace_root.join(dll_name);
-        let dll_dest = exe_dir.join(dll_name);
-        
-        if dll_src.exists() {
-            match fs::copy(&dll_src, &dll_dest) {
-                Ok(_) => {
-                    println!("cargo:warning={} copied to {}", dll_name, dll_dest.display());
-                }
-                Err(e) => {
-                    println!("cargo:warning=failed to copy {} to {}: {}", dll_name, dll_dest.display(), e);
-                }
-            }
-        } else {
-             println!("cargo:warning={} not found at {}", dll_name, dll_src.display());
-        }
+        // 3) Oodle DLL (oo2core_9_win64.dll) is now downloaded on-demand by oodle_loader
+        //    No need to copy it during build - the app will download it automatically if missing/invalid
+        //    This avoids issues with corrupted DLLs being bundled in releases
 
         // 4) Copy UE4-DDS-Tools for texture conversion
         //    Required for convert_texture action in UAssetTool

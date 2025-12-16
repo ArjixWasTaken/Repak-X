@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using UAssetAPI.CustomVersions;
 using UAssetAPI.ExportTypes;
+using UAssetAPI.ExportTypes.Texture;
 using UAssetAPI.FieldTypes;
 using UAssetAPI.JSON;
 using UAssetAPI.PropertyTypes.Objects;
@@ -892,6 +893,16 @@ namespace UAssetAPI
                 string exportClassType = exportClassTypeName.Value.Value;
                 switch (exportClassType)
                 {
+                    case "Texture2D":
+                    case "LightMapTexture2D":
+                    case "ShadowMapTexture2D":
+                    case "TextureCube":
+                    case "VolumeTexture":
+                    case "Texture2DArray":
+                    case "TextureRenderTarget2D":
+                    case "TextureRenderTargetCube":
+                        Exports[i] = Exports[i].ConvertToChildExport<TextureExport>();
+                        break;
                     case "Level":
                         Exports[i] = Exports[i].ConvertToChildExport<LevelExport>();
                         break;

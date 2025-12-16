@@ -43,6 +43,9 @@ pub enum UAssetRequest {
     ConvertTexture { file_path: String },
     #[serde(rename = "strip_mipmaps")]
     StripMipmaps { file_path: String },
+    // Native C# mipmap stripping using UAssetAPI TextureExport
+    #[serde(rename = "strip_mipmaps_native")]
+    StripMipmapsNative { file_path: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -396,6 +399,21 @@ impl UAssetToolkit {
         Ok(true)
     }
 
+    /// Strip mipmaps using native UAssetAPI TextureExport (no Python required)
+    pub async fn strip_mipmaps_native(&self, file_path: &str) -> Result<bool> {
+        let request = UAssetRequest::StripMipmapsNative {
+            file_path: file_path.to_string(),
+        };
+        
+        let response = self.send_request(request).await?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to strip mipmaps (native): {}", response.message);
+        }
+        
+        Ok(true)
+    }
+
     /// Batch detect skeletal meshes - sends all paths at once, returns true if any match
     pub async fn batch_detect_skeletal_mesh(&self, file_paths: &[String]) -> Result<bool> {
         let request = UAssetRequest::BatchDetectSkeletalMesh {
@@ -564,5 +582,10 @@ impl UAssetToolkitSync {
     /// Strip mipmaps from a texture using UE4-DDS-Tools
     pub fn strip_mipmaps(&self, file_path: &str) -> Result<bool> {
         self.block_on(self.toolkit.strip_mipmaps(file_path))
+    }
+
+    /// Strip mipmaps using native UAssetAPI TextureExport (no Python required)
+    pub fn strip_mipmaps_native(&self, file_path: &str) -> Result<bool> {
+        self.block_on(self.toolkit.strip_mipmaps_native(file_path))
     }
 }

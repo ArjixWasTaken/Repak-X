@@ -1,29 +1,126 @@
 use std::path::Path;
 use log::{info, error};
-use uasset_toolkit::UAssetToolkitSync;
 
-/// Integration module for UAssetAPI from GitHub
-/// This module provides texture processing capabilities via UAssetAPI
+// ============================================================================
+// TEXTURE MIPMAP STRIPPING IMPLEMENTATION TOGGLE
+// ============================================================================
+// Options:
+//   "python"  - Use Python UE4-DDS-Tools via UAssetToolkit (proven, requires Python)
+//   "csharp"  - Use native C# UAssetAPI TextureExport (new, no Python needed)
+//   "rust"    - Use Rust uasset-texture-patch crate (experimental, has issues)
+// 
+// Recommended: "csharp" - Native C# using UAssetAPI (fixing Write implementation)
+const TEXTURE_IMPLEMENTATION: &str = "csharp";
+// ============================================================================
 
-/// Processes texture files using UAssetAPI toolkit for MipGenSettings modification
-pub fn process_texture_with_uasset_api(uasset_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    info!("Processing texture with UAssetAPI toolkit: {:?}", uasset_path);
+/// Integration module for texture processing
+/// Supports both native Rust and Python (UE4-DDS-Tools) implementations
+
+/// Convert texture to inline format by stripping mipmaps.
+/// This removes all mipmaps except the first one and embeds the data in .uexp,
+/// eliminating the need for .ubulk files.
+/// 
+/// Uses one of three implementations based on TEXTURE_IMPLEMENTATION constant:
+/// - "python" - Python UE4-DDS-Tools via UAssetToolkit (proven, requires Python)
+/// - "csharp" - Native C# UAssetAPI TextureExport (new, no Python needed)
+/// - "rust"   - Rust uasset-texture-patch crate (experimental)
+pub fn convert_texture_to_inline(uasset_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    match TEXTURE_IMPLEMENTATION {
+        "csharp" => convert_texture_to_inline_csharp(uasset_path),
+        "rust" => convert_texture_to_inline_rust(uasset_path),
+        _ => convert_texture_to_inline_python(uasset_path), // default to python
+    }
+}
+
+/// Native C# implementation using UAssetAPI TextureExport via UAssetTool
+fn convert_texture_to_inline_csharp(uasset_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    use uasset_toolkit::UAssetToolkitSync;
     
-    // Try UAssetAPI toolkit first for most accurate processing
+    info!("[C#] Stripping mipmaps using UAssetAPI TextureExport: {:?}", uasset_path);
+    
     match UAssetToolkitSync::new(None) {
         Ok(toolkit) => {
-            info!("UAssetToolkit initialized successfully");
-            
-            // First check if it's a texture that needs fixing
             let path_str = uasset_path.to_string_lossy();
-            info!("Checking if texture needs MipGen fix: {}", path_str);
+            
+            // Use the new strip_mipmaps_native action
+            match toolkit.strip_mipmaps_native(&path_str) {
+                Ok(true) => {
+                    info!("[C#] Successfully stripped mipmaps: {:?}", uasset_path);
+                    Ok(true)
+                }
+                Ok(false) => {
+                    info!("[C#] Texture already has 1 mipmap or not a texture: {:?}", uasset_path);
+                    Ok(false)
+                }
+                Err(e) => {
+                    error!("[C#] Failed to strip mipmaps from {:?}: {}", uasset_path, e);
+                    Err(e.into())
+                }
+            }
+        }
+        Err(e) => {
+            error!("[C#] Failed to initialize UAssetToolkit: {}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Native Rust implementation - REMOVED (uasset-texture-patch crate had issues)
+#[allow(dead_code)]
+fn convert_texture_to_inline_rust(_uasset_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    error!("[Rust] Rust texture implementation has been removed. Use 'csharp' or 'python' instead.");
+    Err("Rust texture implementation removed".into())
+}
+
+/// Python implementation using UE4-DDS-Tools via UAssetToolkit
+#[allow(dead_code)]
+fn convert_texture_to_inline_python(uasset_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    use uasset_toolkit::UAssetToolkitSync;
+    
+    info!("[Python] Converting texture using UE4-DDS-Tools: {:?}", uasset_path);
+    
+    match UAssetToolkitSync::new(None) {
+        Ok(toolkit) => {
+            let path_str = uasset_path.to_string_lossy();
+            
+            // Use the convert_texture method which calls UE4-DDS-Tools
+            match toolkit.convert_texture(&path_str) {
+                Ok(true) => {
+                    info!("[Python] Successfully converted texture: {:?}", uasset_path);
+                    Ok(true)
+                }
+                Ok(false) => {
+                    info!("[Python] Texture conversion returned false for: {:?}", uasset_path);
+                    Ok(false)
+                }
+                Err(e) => {
+                    error!("[Python] Failed to convert texture {:?}: {}", uasset_path, e);
+                    Err(e.into())
+                }
+            }
+        }
+        Err(e) => {
+            error!("[Python] Failed to initialize UAssetToolkit: {}", e);
+            Err(e.into())
+        }
+    }
+}
+
+/// Processes texture files using UAssetAPI toolkit for MipGenSettings modification
+/// (Legacy function - kept for compatibility but prefer convert_texture_to_inline)
+#[allow(dead_code)]
+pub fn process_texture_with_uasset_api(uasset_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
+    use uasset_toolkit::UAssetToolkitSync;
+    
+    info!("Processing texture with UAssetAPI toolkit: {:?}", uasset_path);
+    
+    match UAssetToolkitSync::new(None) {
+        Ok(toolkit) => {
+            let path_str = uasset_path.to_string_lossy();
             
             match toolkit.is_texture_uasset(&path_str) {
                 Ok(is_texture) => {
-                    info!("is_texture_uasset returned: {}", is_texture);
                     if is_texture {
-                        // It's a texture that needs fixing, now set NoMipmaps
-                        info!("Texture needs fix, calling set_no_mipmaps...");
                         match toolkit.set_no_mipmaps(&path_str) {
                             Ok(()) => {
                                 info!("UAssetAPI toolkit successfully set NoMipmaps: {:?}", uasset_path);
@@ -33,8 +130,6 @@ pub fn process_texture_with_uasset_api(uasset_path: &Path) -> Result<bool, Box<d
                                 error!("Failed to set NoMipmaps for {:?}: {}", uasset_path, e);
                             }
                         }
-                    } else {
-                        info!("UAssetAPI: File is not a texture or already NoMipmaps: {:?}", uasset_path);
                     }
                 }
                 Err(e) => {
@@ -47,43 +142,5 @@ pub fn process_texture_with_uasset_api(uasset_path: &Path) -> Result<bool, Box<d
         }
     }
     
-    // Return false to indicate fallback to existing processing methods
     Ok(false)
-}
-
-/// Convert texture using UE4-DDS-Tools (export -> re-inject with no_mipmaps)
-/// This is the safest texture conversion method that:
-/// 1. Exports the texture to DDS (temp folder)
-/// 2. Re-injects with --no_mipmaps flag
-/// 
-/// This uses the bundled UE4-DDS-Tools Python tool for reliable texture processing.
-pub fn convert_texture_to_inline(uasset_path: &Path) -> Result<bool, Box<dyn std::error::Error>> {
-    info!("Converting texture using UE4-DDS-Tools: {:?}", uasset_path);
-    
-    match UAssetToolkitSync::new(None) {
-        Ok(toolkit) => {
-            let path_str = uasset_path.to_string_lossy();
-            
-            // Use the new convert_texture method which calls UE4-DDS-Tools
-            match toolkit.convert_texture(&path_str) {
-                Ok(true) => {
-                    info!("Successfully converted texture: {:?}", uasset_path);
-                    Ok(true)
-                }
-                Ok(false) => {
-                    info!("Texture conversion returned false for: {:?}", uasset_path);
-                    Ok(false)
-                }
-                Err(e) => {
-                    error!("Failed to convert texture {:?}: {}", uasset_path, e);
-                    // Don't fail the whole process, just log and continue
-                    Ok(false)
-                }
-            }
-        }
-        Err(e) => {
-            error!("Failed to initialize UAssetToolkit for texture conversion: {}", e);
-            Ok(false)
-        }
-    }
 }

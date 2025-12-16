@@ -127,31 +127,15 @@ try {
     # NOTE: UAssetMeshFixer has been merged into UAssetTool (in uassettool folder)
     # No separate copy needed - UAssetTool handles all asset operations
     
-    # ============================================
-    # Copy UE4-DDS-Tools (for texture conversion)
-    # ============================================
-    Write-Info "Copying UE4-DDS-Tools..."
-    $ddsToolsSrc = Join-Path $workspaceRoot "uasset_toolkit\tools\UE4-DDS-Tools"
-    $ddsToolsDst = Join-Path $distDir "uassettool\ue4-dds-tools"
-    if (Test-Path $ddsToolsSrc) {
-        New-Item -ItemType Directory -Force -Path $ddsToolsDst | Out-Null
-        Copy-Item -Path (Join-Path $ddsToolsSrc "*") -Destination $ddsToolsDst -Recurse -Force
-        Write-Success "Copied UE4-DDS-Tools"
-    } else {
-        Write-Warning "UE4-DDS-Tools not found at $ddsToolsSrc - texture conversion will be disabled"
-    }
+    # NOTE: UE4-DDS-Tools (Python) is no longer needed
+    # Texture conversion now uses native C# UAssetTool (TEXTURE_IMPLEMENTATION = "csharp")
     
     # ============================================
-    # Copy Oodle DLL
+    # Oodle DLL - Downloaded on demand
     # ============================================
-    Write-Info "Copying Oodle DLL..."
-    $oodleDll = Join-Path $workspaceRoot "oo2core_9_win64.dll"
-    if (Test-Path $oodleDll) {
-        Copy-Item -LiteralPath $oodleDll -Destination (Join-Path $distDir "oo2core_9_win64.dll") -Force
-        Write-Success "Copied oo2core_9_win64.dll"
-    } else {
-        Write-Warning "oo2core_9_win64.dll not found - Oodle compression may not work"
-    }
+    # NOTE: oo2core_9_win64.dll is now downloaded automatically by the app on first use
+    # This avoids issues with corrupted DLLs being bundled in releases
+    Write-Info "Oodle DLL will be downloaded on-demand by the app (not bundled)"
     
     # NOTE: Data folder (character_data.json) is NOT needed in distribution
     # The app generates this file in the user's AppData/Roaming directory at runtime
@@ -214,7 +198,7 @@ try {
 - ``repak-gui.exe`` - Main application
 - ``uassetbridge/`` - Texture processing tools (optional)
 - ``tools/`` - Additional utilities
-- ``oo2core_9_win64.dll`` - Oodle compression library
+- Oodle compression library (downloaded automatically on first use)
 
 ## Usage
 
@@ -293,8 +277,8 @@ See LICENSE-MIT and LICENSE-APACHE for details.
     
     $components = @(
         @{Name="Main Application"; Path="repak-gui.exe"},
-        @{Name="UAssetTool"; Path="uassettool\UAssetTool.exe"},
-        @{Name="Oodle DLL"; Path="oo2core_9_win64.dll"}
+        @{Name="UAssetTool"; Path="uassettool\UAssetTool.exe"}
+        # Note: Oodle DLL is downloaded on-demand by the app, not bundled
     )
     
     foreach ($component in $components) {

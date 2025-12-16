@@ -113,19 +113,8 @@ try {
             exit 1
         }
         
-        # Copy UE4-DDS-Tools to output
-        $ddsToolsSrc = Join-Path $workspaceRoot "uasset_toolkit\tools\UE4-DDS-Tools"
-        $ddsToolsDst = Join-Path $toolOutput "ue4-dds-tools"
-        if (Test-Path $ddsToolsSrc) {
-            Write-Info "Copying UE4-DDS-Tools..."
-            if (Test-Path $ddsToolsDst) {
-                Remove-Item -Recurse -Force $ddsToolsDst
-            }
-            Copy-Item -Recurse -Force $ddsToolsSrc $ddsToolsDst
-            Write-Success "UE4-DDS-Tools copied"
-        } else {
-            Write-Warning "UE4-DDS-Tools not found at $ddsToolsSrc"
-        }
+        # NOTE: UE4-DDS-Tools (Python) is no longer needed
+        # Texture conversion now uses native C# UAssetTool (TEXTURE_IMPLEMENTATION = "csharp")
     } else {
         Write-Warning "UAssetTool project not found at $toolProject"
     }

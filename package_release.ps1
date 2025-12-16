@@ -99,11 +99,9 @@ if (Test-Path $exportMapCliDir) {
     }
 }
 
-# Copy oodle DLL if present at workspace root
-$oodleDll = Join-Path $root "oo2core_9_win64.dll"
-if (Test-Path $oodleDll) {
-    Copy-Item -LiteralPath $oodleDll -Destination (Join-Path $distDir "oo2core_9_win64.dll") -Force
-}
+# Oodle DLL is now downloaded on-demand by the app
+# No need to bundle it - this avoids corrupted DLL issues in releases
+Write-Host "Oodle DLL will be downloaded on-demand by the app" -ForegroundColor Cyan
 
 # Copy licenses and basic docs
 $docs = @(

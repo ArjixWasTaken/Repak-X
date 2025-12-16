@@ -456,12 +456,26 @@ pub fn recompress_iostore<P: AsRef<Path>>(utoc_path: P, config: Arc<Config>) -> 
     )?;
     
     // Copy all chunks to the new container (writer will compress them)
+    // IMPORTANT: For ExportBundleData chunks, we must preserve the package store entry
+    // metadata in the container header, otherwise the game won't be able to load packages
     for chunk_info in iostore.chunks() {
         let chunk_id = chunk_info.id();
         let data = chunk_info.read()?;
         let path = chunk_info.path().map(|p| UEPathBuf::from(p));
         
-        writer.write_chunk(chunk_id, path.as_ref().map(|p| p.as_ref()), &data)?;
+        // Check if this is an ExportBundleData chunk - these need package store entries preserved
+        if chunk_id.get_chunk_type() == EIoChunkType::ExportBundleData {
+            let package_id = chunk_id.get_package_id();
+            if let Some(store_entry) = iostore.package_store_entry(package_id) {
+                writer.write_package_chunk(chunk_id, path.as_ref().map(|p| p.as_ref()), &data, &store_entry)?;
+            } else {
+                // Fallback to regular write if no store entry found (shouldn't happen for valid IoStore)
+                eprintln!("Warning: No package store entry found for package {:?}, writing without metadata", package_id);
+                writer.write_chunk(chunk_id, path.as_ref().map(|p| p.as_ref()), &data)?;
+            }
+        } else {
+            writer.write_chunk(chunk_id, path.as_ref().map(|p| p.as_ref()), &data)?;
+        }
     }
     
     writer.finalize()?;

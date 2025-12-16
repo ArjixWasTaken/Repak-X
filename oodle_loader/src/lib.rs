@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::sync::OnceLock;
 
 type Result<T, E = Error> = std::result::Result<T, E>;
@@ -53,7 +53,7 @@ mod oodle_lz {
 
         /// faster than SuperFast, less compression
         HyperFast1 = -1,
-        /// faster than HyperFast1, less compression
+        /// faster than HyperFast2, less compression
         HyperFast2 = -2,
         /// faster than HyperFast2, less compression
         HyperFast3 = -3,
@@ -95,27 +95,19 @@ mod oodle_lz {
         unsafe extern "system" fn(compressor: Compressor, rawSize: usize) -> usize;
 }
 
-
-
-struct OodlePlatform {
-    name: &'static str,
-    bytes: &'static [u8],
-}
-
 #[cfg(target_os = "linux")]
-static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
-    name: "liboo2corelinux64.so.9",
-    bytes: include_bytes!("../../liboo2corelinux64.so.9")
-};
-
+const OODLE_LIB_NAME: &str = "liboo2corelinux64.so.9";
+#[cfg(target_os = "linux")]
+const OODLE_DOWNLOAD_URL: &str = "https://github.com/new-world-tools/go-oodle/releases/download/v0.2.3-files/liboo2corelinux64.so.9";
 
 #[cfg(windows)]
-static OODLE_PLATFORM: OodlePlatform = OodlePlatform {
-    name: "oo2core_9_win64.dll",
-    bytes: include_bytes!("../../oo2core_9_win64.dll"),
-};
+const OODLE_LIB_NAME: &str = "oo2core_9_win64.dll";
+#[cfg(windows)]
+const OODLE_DOWNLOAD_URL: &str = "https://github.com/new-world-tools/go-oodle/releases/download/v0.2.3-files/oo2core_9_win64.dll";
 
-
+/// Minimum valid size for the Oodle DLL (around 600KB for Windows)
+/// A corrupted/truncated DLL will be smaller than this
+const OODLE_MIN_VALID_SIZE: u64 = 500_000; // 500KB minimum
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -129,17 +121,84 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("Oodle libloading error {0:?}")]
     LibLoading(#[from] libloading::Error),
+    #[error("Failed to download Oodle library: {0}")]
+    DownloadFailed(String),
 }
 
+/// Check if the Oodle DLL exists and is valid (not corrupted/truncated)
+fn is_oodle_valid(path: &std::path::Path) -> bool {
+    if !path.exists() {
+        return false;
+    }
+    
+    match std::fs::metadata(path) {
+        Ok(metadata) => {
+            let size = metadata.len();
+            if size < OODLE_MIN_VALID_SIZE {
+                eprintln!("Oodle DLL at {:?} is too small ({} bytes), likely corrupted", path, size);
+                return false;
+            }
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Download the Oodle library from a reliable source
+fn download_oodle(target_path: &std::path::Path) -> Result<()> {
+    eprintln!("Downloading Oodle library from {}...", OODLE_DOWNLOAD_URL);
+    
+    // Use ureq for simple HTTP download (it's already a dependency in the workspace)
+    let response = ureq::get(OODLE_DOWNLOAD_URL)
+        .call()
+        .map_err(|e| Error::DownloadFailed(format!("HTTP request failed: {}", e)))?;
+    
+    if response.status() != 200 {
+        return Err(Error::DownloadFailed(format!(
+            "HTTP status {}: {}",
+            response.status(),
+            response.status_text()
+        )));
+    }
+    
+    // Read the response body
+    let mut bytes = Vec::new();
+    response.into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| Error::DownloadFailed(format!("Failed to read response: {}", e)))?;
+    
+    // Validate the downloaded size
+    if (bytes.len() as u64) < OODLE_MIN_VALID_SIZE {
+        return Err(Error::DownloadFailed(format!(
+            "Downloaded file is too small ({} bytes), expected at least {} bytes",
+            bytes.len(),
+            OODLE_MIN_VALID_SIZE
+        )));
+    }
+    
+    // Write to file
+    let mut file = File::create(target_path)?;
+    file.write_all(&bytes)?;
+    
+    eprintln!("Successfully downloaded Oodle library ({} bytes) to {:?}", bytes.len(), target_path);
+    Ok(())
+}
 
 fn fetch_oodle() -> Result<std::path::PathBuf> {
-    let oodle_path = std::env::current_exe()?.with_file_name(OODLE_PLATFORM.name);
-    if !oodle_path.exists() {
-        // fuck downloading the lib virustotal smacks me for it
-        // we finna embed the whole DLL into our program
-        // and pull it out of our asses if we need it
-        File::create(&oodle_path)?.write_all(&OODLE_PLATFORM.bytes)?;
+    let oodle_path = std::env::current_exe()?.with_file_name(OODLE_LIB_NAME);
+    
+    // Check if existing DLL is valid
+    if !is_oodle_valid(&oodle_path) {
+        // Remove corrupted file if it exists
+        if oodle_path.exists() {
+            eprintln!("Removing corrupted/invalid Oodle DLL at {:?}", oodle_path);
+            std::fs::remove_file(&oodle_path).ok();
+        }
+        
+        // Download fresh copy
+        download_oodle(&oodle_path)?;
     }
+    
     Ok(oodle_path)
 }
 
