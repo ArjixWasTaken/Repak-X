@@ -37,13 +37,14 @@ import DropZoneOverlay from './components/DropZoneOverlay'
 import { AuroraText } from './components/ui/AuroraText'
 import Switch from './components/ui/Switch'
 import NumberInput from './components/ui/NumberInput'
-import characterData from './data/character_data.json'
+import characterDataStatic from './data/character_data.json'
 import './App.css'
 import './styles/theme.css'
 import './styles/Badges.css'
 import './styles/Fonts.css'
 import logo from './assets/app-icons/RepakIcon-x256.png'
 import ClashPanel from './components/ClashPanel'
+import HeroFilterDropdown from './components/HeroFilterDropdown'
 
 const toTagArray = (tags) => Array.isArray(tags) ? tags : (tags ? [tags] : [])
 
@@ -71,7 +72,7 @@ function detectHeroes(files) {
   // Map IDs to names
   const heroNames = new Set()
   heroIds.forEach(id => {
-    const char = characterData.find(c => c.id === id)
+    const char = characterDataStatic.find(c => c.id === id)
     if (char) {
       heroNames.add(char.name)
     }
@@ -94,14 +95,13 @@ function getAdditionalCategories(details) {
   return []
 }
 
-// ModItem has been moved to src/components/ModsList.jsx
-
-// ClashPanel has been moved to src/components/ClashPanel.jsx
-
 function App() {
   const [globalUsmap, setGlobalUsmap] = useState('');
   const [hideSuffix, setHideSuffix] = useState(false);
   const [autoOpenDetails, setAutoOpenDetails] = useState(false);
+  const [showHeroIcons, setShowHeroIcons] = useState(false);
+  const [showHeroBg, setShowHeroBg] = useState(false);
+  const [showModType, setShowModType] = useState(false);
 
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
@@ -146,6 +146,7 @@ function App() {
   const [clashes, setClashes] = useState([])
   const [showClashPanel, setShowClashPanel] = useState(false)
   const [launchSuccess, setLaunchSuccess] = useState(false)
+  const [characterData, setCharacterData] = useState(characterDataStatic)
   const [isDragging, setIsDragging] = useState(false)
   const [dropTargetFolder, setDropTargetFolder] = useState(null)
   const dropTargetFolderRef = useRef(null)
@@ -238,7 +239,13 @@ function App() {
     })
 
     // Refresh mod list when character data is updated
-    const unlistenCharUpdate = listen('character_data_updated', () => {
+    const unlistenCharUpdate = listen('character_data_updated', async () => {
+      try {
+        const data = await invoke('get_character_data')
+        setCharacterData(data)
+      } catch (err) {
+        console.error('Failed to refresh character data:', err)
+      }
       loadMods()
     })
 
@@ -254,6 +261,29 @@ function App() {
       if (!paths || paths.length === 0) return
       console.log('Dropped items:', paths)
 
+      // Check if we should quick-organize to a folder (using ref for current value in closure)
+      const targetFolder = dropTargetFolderRef.current
+      if (targetFolder) {
+        // Quick organize: directly install to the folder without showing install panel
+        console.log('Quick organizing to folder:', targetFolder)
+        setStatus(`Quick installing ${paths.length} item(s) to ${targetFolder}...`)
+
+        try {
+          // Install directly using the new backend implementation
+          // Passes raw paths and target folder name
+          await invoke('quick_organize', { paths, targetFolder })
+          setStatus(`Installed ${paths.length} item(s) to ${targetFolder}!`)
+          await loadMods()
+          await loadFolders()
+        } catch (installError) {
+          console.error('Quick install error:', installError)
+          setStatus(`Error installing mods: ${installError}`)
+        }
+
+        setDropTargetFolder(null) // Reset for next drop
+        return
+      }
+
       try {
         setStatus('Processing dropped items...')
         const modsData = await invoke('parse_dropped_files', { paths })
@@ -263,36 +293,9 @@ function App() {
         }
         console.log('Parsed mods:', modsData)
 
-        // Check if we should quick-organize to a folder (using ref for current value in closure)
-        const targetFolder = dropTargetFolderRef.current
-        if (targetFolder) {
-          // Quick organize: directly install to the folder without showing install panel
-          console.log('Quick organizing to folder:', targetFolder)
-          setStatus(`Quick installing ${modsData.length} mod(s) to ${targetFolder}...`)
-
-          // Prepare mods with folder assignment for direct install
-          const modsWithFolder = modsData.map(mod => ({
-            ...mod,
-            targetFolder: targetFolder
-          }))
-
-          try {
-            // Install directly
-            await invoke('install_mods', { mods: modsWithFolder })
-            setStatus(`Installed ${modsData.length} mod(s) to ${targetFolder}!`)
-            await loadMods()
-            await loadFolders()
-          } catch (installError) {
-            console.error('Quick install error:', installError)
-            setStatus(`Error installing mods: ${installError}`)
-          }
-
-          setDropTargetFolder(null) // Reset for next drop
-        } else {
-          // Normal drop: show install panel
-          setModsToInstall(modsData)
-          setShowInstallPanel(true)
-        }
+        // Normal drop: show install panel
+        setModsToInstall(modsData)
+        setShowInstallPanel(true)
       } catch (error) {
         console.error('Parse error:', error)
         setStatus(`Error parsing dropped items: ${error}`)
@@ -376,6 +379,14 @@ function App() {
       const ver = await invoke('get_app_version')
       setVersion(ver)
 
+      // Fetch character data from backend (up-to-date from GitHub sync)
+      try {
+        const charData = await invoke('get_character_data')
+        setCharacterData(charData)
+      } catch (charErr) {
+        console.error('Failed to fetch character data:', charErr)
+      }
+
       await loadMods()
       await loadFolders()
       await checkGame()
@@ -449,8 +460,21 @@ function App() {
     modList.forEach(m => {
       const d = detailsMap[m.path]
       if (!d) return
-      if (d.character_name) charSet.add(d.character_name)
-      if (typeof d.mod_type === 'string' && d.mod_type.startsWith('Multiple Heroes')) hasMulti = true
+
+      // Add single-character mods
+      if (d.character_name && !d.character_name.startsWith('Multiple Heroes')) {
+        charSet.add(d.character_name)
+      }
+
+      // For Multiple Heroes mods, extract individual character names from files
+      if (typeof d.mod_type === 'string' && d.mod_type.startsWith('Multiple Heroes')) {
+        hasMulti = true
+        // Extract individual heroes from the mod's file list
+        if (d.files && Array.isArray(d.files)) {
+          const heroes = detectHeroes(d.files)
+          heroes.forEach(h => charSet.add(h))
+        }
+      }
     })
     const catSet = new Set()
     modList.forEach(m => {
@@ -767,6 +791,25 @@ function App() {
     }
   }
 
+  // Rename a mod (calls backend to rename actual file)
+  const handleRenameMod = async (modPath, newName) => {
+    if (gameRunning) {
+      setStatus('Cannot rename mods while game is running')
+      return
+    }
+
+    try {
+      // TODO: Implement rename_mod command in backend
+      await invoke('rename_mod', { modPath, newName })
+      setStatus(`Renamed to "${newName}"`)
+      await loadMods()
+    } catch (error) {
+      // Fallback: if command doesn't exist yet, just show error
+      setStatus(`Error renaming mod: ${error}`)
+      console.error('rename_mod not implemented yet:', error)
+    }
+  }
+
   const handleDragStart = (e, mod) => {
     if (gameRunning) {
       e.preventDefault()
@@ -1001,17 +1044,41 @@ function App() {
     setGlobalUsmap(settings.globalUsmap || '')
     setHideSuffix(settings.hideSuffix || false)
     setAutoOpenDetails(settings.autoOpenDetails || false)
-    // TODO: Save to backend state
+    setShowHeroIcons(settings.showHeroIcons || false)
+    setShowHeroBg(settings.showHeroBg || false)
+    setShowModType(settings.showModType || false)
+
+    // Save to localStorage for persistence
+    localStorage.setItem('hideSuffix', JSON.stringify(settings.hideSuffix || false))
+    localStorage.setItem('autoOpenDetails', JSON.stringify(settings.autoOpenDetails || false))
+    localStorage.setItem('showHeroIcons', JSON.stringify(settings.showHeroIcons || false))
+    localStorage.setItem('showHeroBg', JSON.stringify(settings.showHeroBg || false))
+    localStorage.setItem('showModType', JSON.stringify(settings.showModType || false))
+
     setStatus('Settings saved')
   }
 
-  // Add this effect to initialize theme
+  // Add this effect to initialize theme and view settings
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') || 'dark';
     const savedAccent = localStorage.getItem('accentColor') || '#4a9eff';
+    const savedViewMode = localStorage.getItem('viewMode') || 'list';
+
+    // Load Mods View Settings
+    const savedHideSuffix = JSON.parse(localStorage.getItem('hideSuffix') || 'false');
+    const savedAutoOpenDetails = JSON.parse(localStorage.getItem('autoOpenDetails') || 'false');
+    const savedShowHeroIcons = JSON.parse(localStorage.getItem('showHeroIcons') || 'false');
+    const savedShowHeroBg = JSON.parse(localStorage.getItem('showHeroBg') || 'false');
+    const savedShowModType = JSON.parse(localStorage.getItem('showModType') || 'false');
 
     handleThemeChange(savedTheme);
     handleAccentChange(savedAccent);
+    setViewMode(savedViewMode);
+    setHideSuffix(savedHideSuffix);
+    setAutoOpenDetails(savedAutoOpenDetails);
+    setShowHeroIcons(savedShowHeroIcons);
+    setShowHeroBg(savedShowHeroBg);
+    setShowModType(savedShowModType);
   }, []);
 
   // Add these handlers
@@ -1026,6 +1093,11 @@ function App() {
     document.documentElement.style.setProperty('--accent-primary', newAccent);
     document.documentElement.style.setProperty('--accent-secondary', newAccent);
     localStorage.setItem('accentColor', newAccent);
+  };
+
+  const handleViewModeChange = (newMode) => {
+    setViewMode(newMode);
+    localStorage.setItem('viewMode', newMode);
   };
 
   return (
@@ -1051,7 +1123,7 @@ function App() {
 
       {showSettings && (
         <SettingsPanel
-          settings={{ globalUsmap, hideSuffix, autoOpenDetails }}
+          settings={{ globalUsmap, hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType }}
           onSave={handleSaveSettings}
           onClose={() => setShowSettings(false)}
           theme={theme}
@@ -1150,29 +1222,33 @@ function App() {
             </AnimatePresence>
           </button>
 
-          <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', background: 'rgba(255,0,0,0.1)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255,0,0,0.3)' }}>
-            <input
-              type="checkbox"
-              checked={gameRunning}
-              onChange={(e) => setGameRunning(e.target.checked)}
-            />
-            <span style={{ fontSize: '0.8rem', color: '#ff6b6b', fontWeight: 'bold' }}>DEV: Game Running</span>
-          </label>
-          <button
-            onClick={handleDevInstallPanel}
-            style={{
-              background: 'rgba(255, 165, 0, 0.1)',
-              color: 'orange',
-              border: '1px solid rgba(255, 165, 0, 0.3)',
-              padding: '4px 8px',
-              borderRadius: '4px',
-              fontSize: '0.8rem',
-              fontWeight: 'bold',
-              cursor: 'pointer'
-            }}
-          >
-            DEV: Install Panel
-          </button>
+          {false && (
+            <>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', background: 'rgba(255,0,0,0.1)', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255,0,0,0.3)' }}>
+                <input
+                  type="checkbox"
+                  checked={gameRunning}
+                  onChange={(e) => setGameRunning(e.target.checked)}
+                />
+                <span style={{ fontSize: '0.8rem', color: '#ff6b6b', fontWeight: 'bold' }}>DEV: Game Running</span>
+              </label>
+              <button
+                onClick={handleDevInstallPanel}
+                style={{
+                  background: 'rgba(255, 165, 0, 0.1)',
+                  color: 'orange',
+                  border: '1px solid rgba(255, 165, 0, 0.3)',
+                  padding: '4px 8px',
+                  borderRadius: '4px',
+                  fontSize: '0.8rem',
+                  fontWeight: 'bold',
+                  cursor: 'pointer'
+                }}
+              >
+                DEV: Install Panel
+              </button>
+            </>
+          )}
           {gameRunning && (
             <div className="game-running-indicator">
               <span className="blink-icon">⚠️</span>
@@ -1253,7 +1329,7 @@ function App() {
               {/* Filters Section */}
               <div className="sidebar-filters" style={{ padding: '0.5rem 0.6rem', borderBottom: '1px solid var(--panel-border)' }}>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                  <div className="filter-title-row">
                     <div style={{ fontSize: '0.75rem', opacity: 0.7, fontWeight: 600 }}>FILTERS</div>
                     {(selectedCharacters.size > 0 || selectedCategories.size > 0) && (
                       <button
@@ -1276,36 +1352,16 @@ function App() {
                     <span style={{ fontSize: '0.7rem', opacity: 0.5 }}>{showCharacterFilters ? '\u25bc' : '\u25b6'}</span>
                   </div>
                   {showCharacterFilters && (
-                    <div className="filter-chips-scroll">
-                      {availableCharacters.map(c => {
-                        const active = selectedCharacters.has(c)
-                        return (
-                          <button
-                            key={c}
-                            className={`filter-chip-compact ${active ? 'active' : ''}`}
-                            onClick={() => setSelectedCharacters(prev => { const next = new Set(prev); active ? next.delete(c) : next.add(c); return next; })}
-                            title={c}
-                          >
-                            {c}
-                          </button>
-                        )
+                    <HeroFilterDropdown
+                      availableCharacters={availableCharacters}
+                      selectedCharacters={selectedCharacters}
+                      modDetails={modDetails}
+                      onToggle={(char) => setSelectedCharacters(prev => {
+                        const next = new Set(prev);
+                        next.has(char) ? next.delete(char) : next.add(char);
+                        return next;
                       })}
-                      {/* Special chips */}
-                      <button
-                        className={`filter-chip-compact ${selectedCharacters.has('__multi') ? 'active' : ''}`}
-                        onClick={() => setSelectedCharacters(prev => { const next = new Set(prev); next.has('__multi') ? next.delete('__multi') : next.add('__multi'); return next; })}
-                        title="Multiple Heroes"
-                      >
-                        Multi
-                      </button>
-                      <button
-                        className={`filter-chip-compact ${selectedCharacters.has('__generic') ? 'active' : ''}`}
-                        onClick={() => setSelectedCharacters(prev => { const next = new Set(prev); next.has('__generic') ? next.delete('__generic') : next.add('__generic'); return next; })}
-                        title="Generic/Global"
-                      >
-                        Generic
-                      </button>
-                    </div>
+                    />
                   )}
 
                   {/* Category Chips */}
@@ -1381,21 +1437,21 @@ function App() {
                   </button>
                   <div className="view-switcher">
                     <button
-                      onClick={() => setViewMode('grid')}
+                      onClick={() => handleViewModeChange('grid')}
                       className={`btn-icon-small ${viewMode === 'grid' ? 'active' : ''}`}
                       title="Grid View"
                     >
                       <GridViewIcon fontSize="small" />
                     </button>
                     <button
-                      onClick={() => setViewMode('compact')}
+                      onClick={() => handleViewModeChange('compact')}
                       className={`btn-icon-small ${viewMode === 'compact' ? 'active' : ''}`}
                       title="Compact View"
                     >
                       <ViewModuleIcon fontSize="small" />
                     </button>
                     <button
-                      onClick={() => setViewMode('list')}
+                      onClick={() => handleViewModeChange('list')}
                       className={`btn-icon-small ${viewMode === 'list' ? 'active' : ''}`}
                       title="List View"
                     >
@@ -1457,11 +1513,15 @@ function App() {
                 onContextMenu={handleContextMenu}
                 formatFileSize={formatFileSize}
                 hideSuffix={hideSuffix}
+                showHeroIcons={showHeroIcons}
+                showHeroBg={showHeroBg}
+                showModType={showModType}
+                modDetails={modDetails}
+                characterData={characterData}
               />
             </div>
           </motion.div>
 
-          {/* Resize Handle */}
           {/* Resize Handle */}
           <motion.div
             className="resize-handle"
@@ -1484,6 +1544,7 @@ function App() {
                     mod={selectedMod}
                     initialDetails={modDetails[selectedMod.path]}
                     onClose={() => setSelectedMod(null)}
+                    characterData={characterData}
                   />
                 </div>
 
@@ -1527,6 +1588,7 @@ function App() {
               }
             }}
             onToggle={() => contextMenu.mod && handleToggleMod(contextMenu.mod.path)}
+            onRename={(newName) => contextMenu.mod && handleRenameMod(contextMenu.mod.path, newName)}
             allTags={allTags}
           />
         )

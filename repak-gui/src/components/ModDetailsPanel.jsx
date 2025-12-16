@@ -73,21 +73,28 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
   const additionalBadges = useMemo(() => {
     if (!details) return []
 
-    // Use explicit field if available and not empty
-    if (details.additional_categories && details.additional_categories.length > 0) {
-      return details.additional_categories
+    const badges = new Set()
+
+    // 1. Use explicit field if available
+    if (details.additional_categories && Array.isArray(details.additional_categories)) {
+      details.additional_categories.forEach(c => badges.add(c))
     }
 
-    // Fallback: Parse from mod_type string
+    // 2. Fallback: Parse from mod_type string
     // Format: "Name - Category [Add1, Add2]"
     if (details.mod_type) {
       const match = details.mod_type.match(/\[(.*?)\]/)
       if (match && match[1]) {
-        return match[1].split(',').map(s => s.trim())
+        match[1].split(',').forEach(s => badges.add(s.trim()))
       }
     }
 
-    return []
+    // 3. Explicit check from backend flag (fixing issue where it might be missing from string)
+    if (details.has_blueprint && details.category !== 'Blueprint') {
+      badges.add('Blueprint')
+    }
+
+    return Array.from(badges)
   }, [details])
 
 

@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { Tooltip } from '@mui/material'
 import { RiDeleteBin2Fill } from 'react-icons/ri'
@@ -78,10 +78,16 @@ function ModItem({
     characterName,
     category,
     viewMode,
-    characterData
+    characterData,
+    onRename,
+    shouldStartRenaming,
+    onClearRenaming
 }) {
     const [isDeleteHolding, setIsDeleteHolding] = useState(false)
+    const [isRenaming, setIsRenaming] = useState(false)
+    const [renameValue, setRenameValue] = useState('')
     const holdTimeoutRef = useRef(null)
+    const renameInputRef = useRef(null)
     const rawName = mod.custom_name || mod.path.split('\\').pop()
     const nameWithoutExt = rawName.replace(/\.[^/.]+$/, '')
 
@@ -123,6 +129,56 @@ function ModItem({
         setIsDeleteHolding(false)
     }
 
+    // Inline rename handlers
+    const startRename = (e) => {
+        e?.stopPropagation()
+        setRenameValue(cleanName)
+        setIsRenaming(true)
+    }
+
+    const handleRenameSubmit = () => {
+        const trimmed = renameValue.trim()
+        if (trimmed && trimmed !== cleanName && onRename) {
+            onRename(mod.path, trimmed)
+        }
+        setIsRenaming(false)
+        setRenameValue('')
+    }
+
+    const handleRenameCancel = () => {
+        setIsRenaming(false)
+        setRenameValue('')
+    }
+
+    const handleRenameKeyDown = (e) => {
+        e.stopPropagation()
+        if (e.key === 'Enter') {
+            e.preventDefault()
+            handleRenameSubmit()
+        } else if (e.key === 'Escape') {
+            e.preventDefault()
+            handleRenameCancel()
+        }
+    }
+
+    // Focus and select input when renaming starts
+    useEffect(() => {
+        if (isRenaming && renameInputRef.current) {
+            renameInputRef.current.focus()
+            renameInputRef.current.select()
+        }
+    }, [isRenaming])
+
+    // Watch for external trigger to start renaming (from context menu)
+    useEffect(() => {
+        if (shouldStartRenaming) {
+            setRenameValue(cleanName)
+            setIsRenaming(true)
+            // Clear the external trigger
+            if (onClearRenaming) onClearRenaming()
+        }
+    }, [shouldStartRenaming])
+
     // Get hero image for background/badge (only if either icons or bg are enabled)
     const heroImage = (showHeroIcons || showHeroBg) ? getHeroImage(characterName, characterData) : null
     const isCardView = viewMode === 'grid' || viewMode === 'compact'
@@ -162,25 +218,41 @@ function ModItem({
                 {heroImage && showHeroIcons && viewMode === 'list' && (
                     <img src={heroImage} alt="" className="mod-hero-icon-inline" />
                 )}
-                <motion.button
-                    type="button"
-                    className="mod-name-button"
-                    onClick={(e) => {
-                        if (e.ctrlKey || e.metaKey) {
-                            handleToggleModSelection(mod)
-                        } else {
-                            onSelect(mod)
-                        }
-                    }}
-                    whileHover={{ color: 'var(--accent-primary)' }}
-                    transition={{ duration: 0 }}
-                    title={rawName}
-                >
-                    <span className="mod-name-text">
-                        {cleanName}
-                        {shouldShowSuffix && <span className="mod-name-suffix">{suffix}</span>}
-                    </span>
-                </motion.button>
+                {isRenaming ? (
+                    <div className="mod-rename-wrapper" onClick={(e) => e.stopPropagation()}>
+                        <input
+                            ref={renameInputRef}
+                            type="text"
+                            className="mod-rename-input"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onKeyDown={handleRenameKeyDown}
+                            onBlur={handleRenameSubmit}
+                        />
+                        {shouldShowSuffix && <span className="mod-rename-suffix">{suffix}</span>}
+                    </div>
+                ) : (
+                    <motion.button
+                        type="button"
+                        className="mod-name-button"
+                        onClick={(e) => {
+                            if (e.ctrlKey || e.metaKey) {
+                                handleToggleModSelection(mod)
+                            } else {
+                                onSelect(mod)
+                            }
+                        }}
+                        onDoubleClick={startRename}
+                        whileHover={{ color: 'var(--accent-primary)' }}
+                        transition={{ duration: 0 }}
+                        title={`${rawName} (double-click to rename)`}
+                    >
+                        <span className="mod-name-text">
+                            {cleanName}
+                            {shouldShowSuffix && <span className="mod-name-suffix">{suffix}</span>}
+                        </span>
+                    </motion.button>
+                )}
             </div>
 
             {/* Hero icon + Mod Type Badge + Tags row */}
@@ -313,7 +385,10 @@ export default function ModsList({
     showHeroBg,
     showModType,
     modDetails,
-    characterData
+    characterData,
+    onRename,
+    renamingModPath,
+    onClearRenaming
 }) {
     return (
         <div
@@ -350,6 +425,9 @@ export default function ModsList({
                             category={details?.category}
                             viewMode={viewMode}
                             characterData={characterData}
+                            onRename={onRename}
+                            shouldStartRenaming={renamingModPath === mod.path}
+                            onClearRenaming={onClearRenaming}
                         />
                     )
                 })

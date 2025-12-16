@@ -233,6 +233,49 @@
     margin-left: 4px;
 }
 
+/* Inline Rename Input (Windows Explorer style) */
+.mod-rename-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+}
+
+.mod-rename-input {
+    flex: 1;
+    min-width: 60px;
+    max-width: 100%;
+    padding: 2px 6px;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--bg-dark, #1a1a1a);
+    border: 1px solid var(--accent-primary);
+    border-radius: 4px;
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(74, 158, 255, 0.2), inset 0 1px 3px rgba(0, 0, 0, 0.3);
+    transition: box-shadow 0.15s ease;
+}
+
+.mod-rename-input:focus {
+    box-shadow: 0 0 0 3px rgba(74, 158, 255, 0.3), inset 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.mod-rename-input::selection {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.mod-rename-suffix {
+    color: var(--text-secondary);
+    font-weight: 400;
+    font-size: 0.85em;
+    opacity: 0.7;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
 /* Row 2: Tags */
 .mod-tags-row {
     display: flex;

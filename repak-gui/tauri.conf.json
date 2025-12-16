@@ -50,5 +50,14 @@
       ]
     },
     "withGlobalTauri": true
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "repakx"
+        ]
+      }
+    }
   }
 }

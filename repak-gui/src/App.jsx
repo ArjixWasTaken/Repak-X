@@ -34,6 +34,7 @@ import FolderTree from './components/FolderTree'
 import ContextMenu from './components/ContextMenu'
 import LogDrawer from './components/LogDrawer'
 import DropZoneOverlay from './components/DropZoneOverlay'
+import ExtensionModOverlay from './components/ExtensionModOverlay'
 import { AuroraText } from './components/ui/AuroraText'
 import Switch from './components/ui/Switch'
 import NumberInput from './components/ui/NumberInput'
@@ -149,6 +150,8 @@ function App() {
   const [characterData, setCharacterData] = useState(characterDataStatic)
   const [isDragging, setIsDragging] = useState(false)
   const [dropTargetFolder, setDropTargetFolder] = useState(null)
+  const [renamingModPath, setRenamingModPath] = useState(null) // Track which mod should start inline renaming
+  const [extensionModPath, setExtensionModPath] = useState(null) // Path of mod received from browser extension
   const dropTargetFolderRef = useRef(null)
 
   const handleCheckClashes = async () => {
@@ -256,6 +259,19 @@ function App() {
       loadFolders()
     })
 
+    // Listen for mods received from browser extension via repakx:// protocol
+    const unlistenExtensionMod = listen('extension-mod-received', (event) => {
+      const filePath = event.payload
+      console.log('Received mod from extension:', filePath)
+      setExtensionModPath(filePath)
+    })
+
+    // Listen for extension mod errors
+    const unlistenExtensionError = listen('extension-mod-error', (event) => {
+      console.error('Extension mod error:', event.payload)
+      setStatus(`Extension error: ${event.payload}`)
+    })
+
     // Unified file drop handler function
     const handleFileDrop = async (paths) => {
       if (!paths || paths.length === 0) return
@@ -334,6 +350,8 @@ function App() {
       unlistenFileDrop.then(f => f())
       unlistenLogs.then(f => f())
       unlistenDirChanged.then(f => f())
+      unlistenExtensionMod.then(f => f())
+      unlistenExtensionError.then(f => f())
       document.removeEventListener('dragover', preventDefault)
       document.removeEventListener('drop', preventDefault)
     }
@@ -810,6 +828,30 @@ function App() {
     }
   }
 
+  // Handle installing a mod received from the browser extension
+  const handleExtensionModInstall = async (targetFolderId) => {
+    if (!extensionModPath) return
+
+    try {
+      setStatus(`Installing mod from extension...`)
+
+      // Use quick_organize to install the mod to the selected folder
+      // If no folder selected, it installs to root
+      await invoke('quick_organize', {
+        paths: [extensionModPath],
+        targetFolder: targetFolderId || null
+      })
+
+      setStatus(`Mod installed successfully!`)
+      setExtensionModPath(null) // Close the overlay
+      await loadMods()
+      await loadFolders()
+    } catch (error) {
+      console.error('Extension mod install error:', error)
+      setStatus(`Error installing mod: ${error}`)
+    }
+  }
+
   const handleDragStart = (e, mod) => {
     if (gameRunning) {
       e.preventDefault()
@@ -1159,6 +1201,15 @@ function App() {
           setDropTargetFolder(folderId)
         }}
         onClose={() => setIsDragging(false)}
+      />
+
+      {/* Extension Mod Overlay - for mods received from browser extension */}
+      <ExtensionModOverlay
+        isVisible={!!extensionModPath}
+        filePath={extensionModPath}
+        folders={folders}
+        onInstall={handleExtensionModInstall}
+        onCancel={() => setExtensionModPath(null)}
       />
 
 
@@ -1518,6 +1569,9 @@ function App() {
                 showModType={showModType}
                 modDetails={modDetails}
                 characterData={characterData}
+                onRename={handleRenameMod}
+                renamingModPath={renamingModPath}
+                onClearRenaming={() => setRenamingModPath(null)}
               />
             </div>
           </motion.div>
@@ -1588,7 +1642,11 @@ function App() {
               }
             }}
             onToggle={() => contextMenu.mod && handleToggleMod(contextMenu.mod.path)}
-            onRename={(newName) => contextMenu.mod && handleRenameMod(contextMenu.mod.path, newName)}
+            onRename={() => {
+              if (contextMenu.mod) {
+                setRenamingModPath(contextMenu.mod.path)
+              }
+            }}
             allTags={allTags}
           />
         )
