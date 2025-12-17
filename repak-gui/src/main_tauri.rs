@@ -498,7 +498,8 @@ async fn parse_dropped_files(
             .to_string();
         
         // Determine mod type and auto-detection flags
-        let (mod_type, auto_fix_mesh, auto_fix_texture, auto_fix_serialize_size) = if path.is_dir() {
+        // 5-tuple: (mod_type, auto_fix_mesh, auto_fix_texture, auto_fix_serialize_size, contains_uassets)
+        let (mod_type, auto_fix_mesh, auto_fix_texture, auto_fix_serialize_size, contains_uassets) = if path.is_dir() {
             // First check if directory contains multiple PAK files - if so, process each PAK separately
             use walkdir::WalkDir;
             let mut pak_files = Vec::new();
@@ -618,12 +619,17 @@ async fn parse_dropped_files(
                     info!("{}", summary);
                     let _ = window.emit("install_log", &summary);
                     
-                    (mod_type, has_skeletal_mesh, has_texture, has_static_mesh)
+                    // Check if directory contains uasset files
+                    use crate::install_mod::contains_uasset_files;
+                    let has_uassets = contains_uasset_files(&all_files_absolute);
+                    let _ = window.emit("install_log", format!("[Detection] Contains UAssets: {}", has_uassets));
+                    
+                    (mod_type, has_skeletal_mesh, has_texture, has_static_mesh, has_uassets)
                 } else {
-                    ("Directory".to_string(), false, false, false)
+                    ("Directory".to_string(), false, false, false, true) // Default to true for safety
                 }
             } else {
-                ("Directory".to_string(), false, false, false)
+                ("Directory".to_string(), false, false, false, true) // Default to true for safety
             }
         } else {
             // Get file extension
@@ -831,7 +837,7 @@ async fn parse_dropped_files(
                 }
                 
                 // Fallback if extraction/analysis failed
-                ("Archive".to_string(), false, false, false)
+                ("Archive".to_string(), false, false, false, true) // Default to true for safety
             } else if ext == "pak" {
                 // Check if this is an IoStore package (has .utoc and .ucas companions)
                 let utoc_path = path.with_extension("utoc");
@@ -970,9 +976,9 @@ async fn parse_dropped_files(
                     "Unknown".to_string()
                 };
                 
-                (mod_type, false, false, false)
+                (mod_type, false, false, false, true) // Default to true for safety
             } else {
-                ("Unknown".to_string(), false, false, false)
+                ("Unknown".to_string(), false, false, false, true) // Default to true for safety
             }
         };
 
@@ -981,8 +987,6 @@ async fn parse_dropped_files(
         let is_iostore_pkg = is_pak && path.with_extension("utoc").exists() && path.with_extension("ucas").exists();
         let auto_to_repak = is_pak && !is_iostore_pkg;
 
-        // Default contains_uassets to true for fallback cases (safer default)
-        // The early returns above handle the proper detection
         mods.push(InstallableModInfo {
             mod_name,
             mod_type,
@@ -992,7 +996,7 @@ async fn parse_dropped_files(
             auto_fix_texture,
             auto_fix_serialize_size,
             auto_to_repak,
-            contains_uassets: true, // Default to true for safety in fallback cases
+            contains_uassets,
         });
     }
 
