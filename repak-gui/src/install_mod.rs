@@ -45,6 +45,9 @@ pub struct InstallableMod {
     /// Whether the mod contains any .uasset/.uexp/.ubulk/.umap files
     /// Used by frontend to lock/unlock certain toggles (e.g., fix mesh/texture only applies to uasset mods)
     pub contains_uassets: bool,
+    /// Force legacy PAK format instead of IoStore conversion
+    /// Used for Audio/Config mods that don't need IoStore processing
+    pub force_legacy_pak: bool,
 }
 
 impl Default for InstallableMod {
@@ -71,6 +74,7 @@ impl Default for InstallableMod {
             is_archived: false,
             enabled: true,
             contains_uassets: true, // Default to true for safety
+            force_legacy_pak: false,
         }
     }
 }

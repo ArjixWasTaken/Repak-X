@@ -30,6 +30,14 @@ pub fn convert_to_iostore_directory(
     packed_files_count: &AtomicI32,
 ) -> Result<(), repak::Error> {
     let mod_type = pak.mod_type.clone();
+    
+    // Check for force_legacy_pak flag - skip IoStore conversion entirely
+    if pak.force_legacy_pak {
+        info!("Force Legacy PAK enabled for '{}'. Skipping IoStore conversion.", pak.mod_name);
+        repak_dir(pak, to_pak_dir, mod_dir, packed_files_count)?;
+        return Ok(());
+    }
+    
     if mod_type == "Audio" || mod_type == "Movies" {
         debug!("{} mod detected. Not creating iostore packages",mod_type);
         repak_dir(pak, to_pak_dir, mod_dir, packed_files_count)?;

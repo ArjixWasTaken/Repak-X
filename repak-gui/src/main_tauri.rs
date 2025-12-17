@@ -1016,6 +1016,8 @@ struct ModToInstall {
     fix_serialize_size: bool,
     #[serde(rename = "toRepak")]
     to_repak: bool,
+    #[serde(rename = "forceLegacy")]
+    force_legacy: bool,
 }
 
 /// Helper function to copy an IoStore bundle (.utoc/.ucas) and recompress if needed
@@ -1343,6 +1345,7 @@ async fn install_mods(
             installable.fix_textures = mod_to_install.fix_texture;
             installable.fix_serialsize_header = mod_to_install.fix_serialize_size;
             installable.repak = mod_to_install.to_repak;
+            installable.force_legacy_pak = mod_to_install.force_legacy;
             installable.usmap_path = usmap_filename.clone();
         }
     }
@@ -1371,6 +1374,7 @@ async fn install_mods(
                 window_for_logs.emit("install_log", format!("  - Fix Textures: {}", imod.fix_textures)).ok();
                 window_for_logs.emit("install_log", format!("  - Fix SerializeSize: {}", imod.fix_serialsize_header)).ok();
                 window_for_logs.emit("install_log", format!("  - Repak: {}", imod.repak)).ok();
+                window_for_logs.emit("install_log", format!("  - Force Legacy PAK: {}", imod.force_legacy_pak)).ok();
             }
             
             window_for_logs.emit("install_log", "Calling installation logic...").ok();
