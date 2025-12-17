@@ -573,3 +573,191 @@ Consider adding a visual indicator (badge or icon) to show when a mod doesn't co
   margin-left: 8px;
 }
 ```
+
+---
+
+## Install Subfolder Selection - Frontend Integration
+
+### Overview
+
+This feature allows users to select a subfolder within the mods directory where each mod will be installed. The default is the mods folder root directory (empty string).
+
+### Backend Changes (Already Implemented)
+
+**1. `InstallableMod` struct now includes:**
+```rust
+/// Subfolder within the mods directory to install into (empty = root)
+pub install_subfolder: String,
+```
+
+**2. `ModToInstall` struct now includes:**
+```rust
+#[serde(rename = "installSubfolder", default)]
+install_subfolder: String,
+```
+
+**3. Installation logic in `install_mod_logic.rs`:**
+- Determines output directory based on `install_subfolder` field
+- Creates the subfolder if it doesn't exist
+- All installation paths (IoStore copy, repak, directory conversion) use the resolved output directory
+
+### Frontend Changes Required (InstallModPanel.jsx)
+
+**1. Add State for Subfolder Selection**
+
+```javascript
+// Add state to track install subfolder per mod
+const [installSubfolders, setInstallSubfolders] = useState({});
+
+// Add state for available subfolders (fetched from backend or derived)
+const [availableSubfolders, setAvailableSubfolders] = useState([]);
+```
+
+**2. Fetch Available Subfolders**
+
+On component mount or when mods directory changes, fetch existing subfolders:
+
+```javascript
+useEffect(() => {
+  const fetchSubfolders = async () => {
+    try {
+      // Assuming a Tauri command exists or will be created
+      const subfolders = await invoke('get_mod_subfolders');
+      setAvailableSubfolders(subfolders);
+    } catch (error) {
+      console.error('Failed to fetch subfolders:', error);
+      setAvailableSubfolders([]);
+    }
+  };
+  fetchSubfolders();
+}, []);
+```
+
+**3. Add Subfolder Input/Dropdown per Mod Card**
+
+Add a dropdown or input field in the mod card footer section:
+
+```javascript
+// In the mod card render, add subfolder selection
+<div className="install-mod-card__subfolder">
+  <label className="install-subfolder__label">Install to:</label>
+  <select
+    value={installSubfolders[idx] || ''}
+    onChange={(e) => setInstallSubfolders(prev => ({
+      ...prev,
+      [idx]: e.target.value
+    }))}
+    className="install-subfolder__select"
+  >
+    <option value="">Mods Root</option>
+    {availableSubfolders.map(folder => (
+      <option key={folder} value={folder}>{folder}</option>
+    ))}
+  </select>
+  {/* Optional: Allow custom subfolder input */}
+  <input
+    type="text"
+    placeholder="Or type new folder..."
+    value={installSubfolders[idx] || ''}
+    onChange={(e) => setInstallSubfolders(prev => ({
+      ...prev,
+      [idx]: e.target.value
+    }))}
+    className="install-subfolder__input"
+  />
+</div>
+```
+
+**4. Update `handleInstall` to Include Subfolder**
+
+```javascript
+const handleInstall = async () => {
+  const modsToInstall = mods.map((mod, idx) => ({
+    ...mod,
+    ...modSettings[idx],
+    path: mod.path,
+    customName: modSettings[idx]?.customName || null,
+    toRepak: isRepakLocked(mod) ? false : (modSettings[idx]?.toRepak || false),
+    forceLegacy: modSettings[idx]?.forceLegacy || false,
+    installSubfolder: installSubfolders[idx] || '',  // NEW: Include subfolder
+  }));
+
+  try {
+    await invoke('install_mods', { mods: modsToInstall });
+    // Handle success
+  } catch (error) {
+    // Handle error
+  }
+};
+```
+
+**5. Initialize Subfolder State in `buildInitialSettings`**
+
+```javascript
+const buildInitialSettings = (mods) => {
+  return mods.reduce((acc, mod, idx) => {
+    acc[idx] = {
+      fixMesh: mod.auto_fix_mesh || false,
+      fixTexture: mod.auto_fix_texture || false,
+      fixSerializeSize: mod.auto_fix_serialize_size || false,
+      toRepak: mod.auto_to_repak || false,
+      forceLegacy: mod.force_legacy || false,
+      customName: '',
+      installSubfolder: '',  // NEW: Default to root
+    };
+    return acc;
+  }, {});
+};
+```
+
+### CSS Styling
+
+```css
+.install-mod-card__subfolder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+
+.install-subfolder__label {
+  font-size: 0.85rem;
+  color: #aaa;
+  white-space: nowrap;
+}
+
+.install-subfolder__select,
+.install-subfolder__input {
+  flex: 1;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #2a2a2a;
+  color: #fff;
+  font-size: 0.85rem;
+}
+
+.install-subfolder__select:focus,
+.install-subfolder__input:focus {
+  outline: none;
+  border-color: #007acc;
+}
+```
+
+### Behavior
+
+| Subfolder Value | Result |
+|-----------------|--------|
+| Empty string `""` | Mod installed to mods root directory |
+| `"Characters"` | Mod installed to `<mods_dir>/Characters/` |
+| `"Audio/Music"` | Mod installed to `<mods_dir>/Audio/Music/` (nested) |
+
+### Notes
+
+- The backend automatically creates the subfolder if it doesn't exist
+- Subfolder paths are relative to the mods root directory
+- Forward slashes work on all platforms (Rust handles path normalization)
+- Consider adding a "Browse" button to open a folder picker dialog

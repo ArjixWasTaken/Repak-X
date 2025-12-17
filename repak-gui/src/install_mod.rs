@@ -48,6 +48,8 @@ pub struct InstallableMod {
     /// Force legacy PAK format instead of IoStore conversion
     /// Used for Audio/Config mods that don't need IoStore processing
     pub force_legacy_pak: bool,
+    /// Subfolder within the mods directory to install into (empty = root)
+    pub install_subfolder: String,
 }
 
 impl Default for InstallableMod {
@@ -75,6 +77,7 @@ impl Default for InstallableMod {
             enabled: true,
             contains_uassets: true, // Default to true for safety
             force_legacy_pak: false,
+            install_subfolder: String::new(),
         }
     }
 }
