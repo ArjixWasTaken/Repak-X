@@ -1018,6 +1018,9 @@ struct ModToInstall {
     to_repak: bool,
     #[serde(rename = "forceLegacy")]
     force_legacy: bool,
+    /// Subfolder within the mods directory to install into (empty = root)
+    #[serde(rename = "installSubfolder", default)]
+    install_subfolder: String,
 }
 
 /// Helper function to copy an IoStore bundle (.utoc/.ucas) and recompress if needed
@@ -1346,6 +1349,7 @@ async fn install_mods(
             installable.fix_serialsize_header = mod_to_install.fix_serialize_size;
             installable.repak = mod_to_install.to_repak;
             installable.force_legacy_pak = mod_to_install.force_legacy;
+            installable.install_subfolder = mod_to_install.install_subfolder.clone();
             installable.usmap_path = usmap_filename.clone();
         }
     }
