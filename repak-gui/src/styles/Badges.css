@@ -107,3 +107,27 @@
   color: #fbbf24;
   border: 1px solid rgba(251, 191, 36, 0.35);
 }
+
+/* No UAssets badge - grey/neutral */
+.no-uassets-badge {
+  display: inline-block;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: rgba(120, 120, 130, 0.15);
+  color: #a1a1aa;
+  border: 1px solid rgba(161, 161, 170, 0.35);
+}
+
+/* IoStore Package badge - purple/pink */
+.iostore-badge {
+  display: inline-block;
+  padding: 0.4rem 0.75rem;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  background: rgba(192, 38, 211, 0.15);
+  color: #e879f9;
+  border: 1px solid rgba(192, 38, 211, 0.35);
+}

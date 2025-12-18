@@ -27,7 +27,7 @@ const buildInitialSettings = (mods = []) => {
       fixTexture: canApplyPatches ? (mod.auto_fix_texture || false) : false,
       fixSerializeSize: canApplyPatches ? (mod.auto_fix_serialize_size || false) : false,
       toRepak: effectiveToRepak,
-      forceLegacy: mod.auto_force_legacy || false,
+      forceLegacy: mod.contains_uassets === false ? true : (mod.auto_force_legacy || false),
       compression: 'Oodle',
       usmapPath: '',
       customName: '',

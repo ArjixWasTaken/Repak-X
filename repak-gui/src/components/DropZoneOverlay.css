@@ -109,6 +109,38 @@
     flex-shrink: 0;
 }
 
+/* New Folder Drop Target */
+.new-folder-drop-target {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    margin-bottom: 0.5rem;
+    border-radius: 8px;
+    border: 2px dashed color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 50%);
+    background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 95%);
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.new-folder-drop-target svg {
+    font-size: 1.2rem;
+    color: var(--accent-primary, #4a9eff);
+}
+
+.new-folder-drop-target.active {
+    border-color: var(--accent-primary, #4a9eff);
+    border-style: solid;
+    background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 80%);
+    color: var(--accent-primary, #4a9eff);
+    transform: scale(1.02);
+    box-shadow: 0 0 20px color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 70%);
+}
+
 /* Folder Tree Wrapper */
 .folder-tree-wrapper {
     flex: 1;

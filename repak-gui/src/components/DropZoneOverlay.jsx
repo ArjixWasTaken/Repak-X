@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { motion, AnimatePresence } from 'framer-motion';
-import { VscFolder, VscFolderOpened, VscChevronRight, VscChevronDown } from 'react-icons/vsc';
+import { VscFolder, VscFolderOpened, VscChevronRight, VscChevronDown, VscNewFolder } from 'react-icons/vsc';
 import { MdInstallDesktop, MdCreateNewFolder } from 'react-icons/md';
 import './DropZoneOverlay.css';
 
@@ -101,10 +101,13 @@ const DropZoneOverlay = ({
     folders = [],
     onInstallDrop,
     onQuickOrganizeDrop,
-    onClose
+    onClose,
+    onCreateFolder,
+    onNewFolderDrop
 }) => {
-    const [hoveredZone, setHoveredZone] = useState(null); // 'install' | 'organize'
+    const [hoveredZone, setHoveredZone] = useState(null); // 'install' | 'organize' | 'new-folder'
     const [selectedFolderId, setSelectedFolderId] = useState(null);
+    const [isCreatingFolder, setIsCreatingFolder] = useState(false);
     const overlayRef = useRef(null);
     const folderTreeRef = useRef(null);
     const scrollIntervalRef = useRef(null);
@@ -189,6 +192,15 @@ const DropZoneOverlay = ({
                 return;
             }
 
+            // Check if over new-folder drop target
+            const newFolderZone = element.closest('[data-dropzone="new-folder"]');
+            if (newFolderZone) {
+                setHoveredZone('new-folder');
+                setSelectedFolderId(null);
+                onNewFolderDrop?.();
+                return;
+            }
+
             // Check if over a specific folder
             const folderItem = element.closest('[data-folder-id]');
             if (folderItem) {
@@ -219,7 +231,27 @@ const DropZoneOverlay = ({
             unlistenDragOver.then(f => f());
             stopScrolling();
         };
-    }, [isVisible, selectedFolderId, onInstallDrop, onQuickOrganizeDrop]);
+    }, [isVisible, selectedFolderId, onInstallDrop, onQuickOrganizeDrop, onNewFolderDrop]);
+
+    const handleNewFolder = async (e) => {
+        e.stopPropagation();
+        const name = prompt('Enter new folder name:');
+        if (!name || !name.trim()) return;
+
+        setIsCreatingFolder(true);
+        try {
+            if (onCreateFolder) {
+                const newFolderId = await onCreateFolder(name.trim());
+                if (newFolderId) {
+                    setSelectedFolderId(newFolderId);
+                }
+            }
+        } catch (err) {
+            console.error('Failed to create folder:', err);
+        } finally {
+            setIsCreatingFolder(false);
+        }
+    };
 
     return (
         <AnimatePresence>
@@ -264,6 +296,15 @@ const DropZoneOverlay = ({
                             </div>
                             <h2>Quick Organize</h2>
                             <p>Hover over a folder below, then drop to install there</p>
+
+                            {/* New Folder Drop Target */}
+                            <div
+                                className={`new-folder-drop-target ${hoveredZone === 'new-folder' ? 'active' : ''}`}
+                                data-dropzone="new-folder"
+                            >
+                                <VscNewFolder />
+                                <span>{hoveredZone === 'new-folder' ? 'Drop to create new folder' : 'Drop here → New Folder'}</span>
+                            </div>
 
                             <div className="folder-tree-wrapper">
                                 {/* Scroll zone - Top */}

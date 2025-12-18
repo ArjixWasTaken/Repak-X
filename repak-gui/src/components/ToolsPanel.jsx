@@ -1,12 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-shell';
 import { IoMdRefresh, IoIosSkipForward } from "react-icons/io";
-import { FaFileZipper } from "react-icons/fa6";
+import { RiFileZipFill } from "react-icons/ri";
+import { MdAutoFixHigh } from "react-icons/md";
 import Switch from './ui/Switch';
+import Progress from './ui/Progress';
 import './SettingsPanel.css'; // Reuse the same styles
 
-export default function ToolsPanel({ onClose }) {
+export default function ToolsPanel({ onClose, mods = [], onToggleMod }) {
     const [isUpdatingChars, setIsUpdatingChars] = useState(false);
     const [charUpdateStatus, setCharUpdateStatus] = useState('');
     const [isSkippingLauncher, setIsSkippingLauncher] = useState(false);
@@ -15,6 +18,24 @@ export default function ToolsPanel({ onClose }) {
     const [isRecompressing, setIsRecompressing] = useState(false);
     const [recompressStatus, setRecompressStatus] = useState('');
     const [recompressResult, setRecompressResult] = useState(null);
+    const [recompressProgress, setRecompressProgress] = useState({ current: 0, total: 0 });
+    const [showThanosSnap, setShowThanosSnap] = useState(null); // null or timestamp for cache-busting
+    const [thanosIsFading, setThanosIsFading] = useState(false);
+
+    // Find LOD Disabler mod
+    const lodDisablerMod = useMemo(() => {
+        return mods.find(mod => {
+            const modName = mod.custom_name || mod.path?.split('\\').pop() || '';
+            return modName.toLowerCase().includes('lods_disabler') ||
+                mod.path?.toLowerCase().includes('lods_disabler');
+        });
+    }, [mods]);
+
+    // Get display name for LOD Disabler mod
+    const lodModDisplayName = useMemo(() => {
+        if (!lodDisablerMod) return '';
+        return lodDisablerMod.custom_name || lodDisablerMod.path?.split('\\').pop() || 'Unknown';
+    }, [lodDisablerMod]);
 
     // Check skip launcher status on mount
     useEffect(() => {
@@ -63,6 +84,7 @@ export default function ToolsPanel({ onClose }) {
     useEffect(() => {
         const unlisten = listen('recompress_progress', (event) => {
             const { current, total, status } = event.payload;
+            setRecompressProgress({ current, total });
             setRecompressStatus(`${status} (${current}/${total})`);
         });
 
@@ -123,147 +145,242 @@ export default function ToolsPanel({ onClose }) {
             setRecompressStatus(`Error: ${error}`);
         } finally {
             setIsRecompressing(false);
+            setRecompressProgress({ current: 0, total: 0 });
         }
     };
 
     return (
-        <div className="modal-overlay" onClick={onClose}>
-            <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
-                <div className="modal-header">
-                    <h2>Tools</h2>
-                    <button className="modal-close" onClick={onClose}>×</button>
-                </div>
+        <>
+            <div className="modal-overlay" onClick={onClose}>
+                <div className="modal-content settings-modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="modal-header">
+                        <h2>Tools</h2>
+                        <button className="modal-close" onClick={onClose}>×</button>
+                    </div>
 
-                <div className="modal-body">
-                    <div className="setting-section">
-                        <h3>Skip Launcher Patch</h3>
-                        <div className="setting-group">
-                            <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                Sets <b>launch_record</b> value to 0.
-                            </p>
-                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                                <button
-                                    onClick={handleSkipLauncherPatch}
-                                    disabled={isSkippingLauncher}
-                                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                >
-                                    <IoIosSkipForward size={16} />
-                                    {isSkippingLauncher ? 'Applying...' : 'Skip Launcher Patch'}
-                                </button>
-                                <span style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '0.4rem',
-                                    fontSize: '0.85rem',
-                                    fontWeight: 600,
-                                    color: isLauncherPatchEnabled ? '#4CAF50' : '#ff5252'
-                                }}>
+                    <div className="modal-body">
+                        <div className="setting-section">
+                            <h3>Skip Launcher Patch</h3>
+                            <div className="setting-group">
+                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                                    Sets <b>launch_record</b> value to 0.
+                                </p>
+                                <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                                    <button
+                                        onClick={handleSkipLauncherPatch}
+                                        disabled={isSkippingLauncher}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                                    >
+                                        <IoIosSkipForward size={16} />
+                                        {isSkippingLauncher ? 'Applying...' : 'Skip Launcher Patch'}
+                                    </button>
                                     <span style={{
-                                        width: '8px',
-                                        height: '8px',
-                                        borderRadius: '50%',
-                                        backgroundColor: isLauncherPatchEnabled ? '#4CAF50' : '#ff5252'
-                                    }}></span>
-                                    {isLauncherPatchEnabled ? 'Enabled' : 'Disabled'}
-                                </span>
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.4rem',
+                                        fontSize: '0.85rem',
+                                        fontWeight: 600,
+                                        color: isLauncherPatchEnabled ? '#4CAF50' : '#ff5252'
+                                    }}>
+                                        <span style={{
+                                            width: '8px',
+                                            height: '8px',
+                                            borderRadius: '50%',
+                                            backgroundColor: isLauncherPatchEnabled ? '#4CAF50' : '#ff5252'
+                                        }}></span>
+                                        {isLauncherPatchEnabled ? 'Enabled' : 'Disabled'}
+                                    </span>
+                                </div>
+                                {skipLauncherStatus && (
+                                    <p style={{
+                                        fontSize: '0.85rem',
+                                        marginTop: '0.5rem',
+                                        color: skipLauncherStatus.includes('Error') ? '#ff5252' : '#4CAF50'
+                                    }}>
+                                        {skipLauncherStatus}
+                                    </p>
+                                )}
                             </div>
-                            {skipLauncherStatus && (
-                                <p style={{
-                                    fontSize: '0.85rem',
-                                    marginTop: '0.5rem',
-                                    color: skipLauncherStatus.includes('Error') ? '#ff5252' : '#4CAF50'
-                                }}>
-                                    {skipLauncherStatus}
+                        </div>
+
+                        <div className="setting-section">
+                            <h3>Character Database</h3>
+                            <div className="setting-group">
+                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                                    Update the character database from GitHub to support new heroes and skins.
                                 </p>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="setting-section">
-                        <h3>Character Database</h3>
-                        <div className="setting-group">
-                            <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                Update the character database from GitHub to support new heroes and skins.
-                            </p>
-                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                <button
-                                    onClick={handleUpdateCharacterData}
-                                    disabled={isUpdatingChars}
-                                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                >
-                                    <IoMdRefresh size={18} className={isUpdatingChars ? 'spin-animation' : ''} />
-                                    {isUpdatingChars ? 'Updating...' : 'Update Heroes Database'}
-                                </button>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button
+                                        onClick={handleUpdateCharacterData}
+                                        disabled={isUpdatingChars}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                                    >
+                                        <IoMdRefresh size={18} className={isUpdatingChars ? 'spin-animation' : ''} />
+                                        {isUpdatingChars ? 'Updating...' : 'Update Heroes Database'}
+                                    </button>
+                                </div>
+                                {charUpdateStatus && (
+                                    <p style={{
+                                        fontSize: '0.85rem',
+                                        marginTop: '0.5rem',
+                                        color: charUpdateStatus.includes('Error') || charUpdateStatus.includes('Cancelled') ? '#ff5252' : '#4CAF50'
+                                    }}>
+                                        {charUpdateStatus}
+                                    </p>
+                                )}
                             </div>
-                            {charUpdateStatus && (
-                                <p style={{
-                                    fontSize: '0.85rem',
-                                    marginTop: '0.5rem',
-                                    color: charUpdateStatus.includes('Error') || charUpdateStatus.includes('Cancelled') ? '#ff5252' : '#4CAF50'
-                                }}>
-                                    {charUpdateStatus}
+                        </div>
+
+                        <div className="setting-section">
+                            <h3>ReCompress</h3>
+                            <div className="setting-group">
+                                <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                                    Apply Oodle compression to all IOStore bundles paked with the old Repak GUI.
                                 </p>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="setting-section">
-                        <h3>ReCompress</h3>
-                        <div className="setting-group">
-                            <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                Apply Oodle compression to IOStore bundles paked with an outdated mod manager. <img src="https://i.imgur.com/N5cCamW.png" alt="" style={{ width: '24px', height: '24px', verticalAlign: 'middle' }} />
-                            </p>
-                            <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                <button
-                                    onClick={handleReCompress}
-                                    disabled={isRecompressing}
-                                    style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-                                >
-                                    <FaFileZipper size={16} className={isRecompressing ? 'spin-animation' : ''} />
-                                    {isRecompressing ? 'Scanning...' : 'ReCompress'}
-                                </button>
-                            </div>
-                            {recompressStatus && (
-                                <p style={{
-                                    fontSize: '0.85rem',
-                                    marginTop: '0.5rem',
-                                    color: recompressStatus.includes('Error') ? '#ff5252' : '#4CAF50'
-                                }}>
-                                    {recompressStatus}
-                                </p>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="setting-section" style={{ opacity: 0.5, pointerEvents: 'none' }}>
-                        <h3>Character LODs Thanos</h3>
-                        <div className="setting-group">
-                            <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
-                                Coming soon...
-                            </p>
-                            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                                <Switch
-                                    isOn={false}
-                                    onToggle={() => { }}
-                                    disabled={true}
-                                />
-                                <span style={{ fontSize: '0.9rem' }}>Enable LOD Thanos</span>
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <button
+                                        onClick={handleReCompress}
+                                        disabled={isRecompressing}
+                                        style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                                    >
+                                        <RiFileZipFill size={16} className={isRecompressing ? 'spin-animation' : ''} />
+                                        {isRecompressing ? 'Scanning...' : 'ReCompress'}
+                                    </button>
+                                </div>
+                                {isRecompressing && recompressProgress.total > 0 && (
+                                    <div style={{ marginTop: '0.75rem' }}>
+                                        <Progress
+                                            value={recompressProgress.current}
+                                            maxValue={recompressProgress.total}
+                                            size="md"
+                                            color="primary"
+                                            showValueLabel
+                                            isStriped
+                                        />
+                                    </div>
+                                )}
+                                {recompressStatus && (
+                                    <p style={{
+                                        fontSize: '0.85rem',
+                                        marginTop: '0.5rem',
+                                        color: recompressStatus.includes('Error') ? '#ff5252' : '#4CAF50'
+                                    }}>
+                                        {recompressStatus}
+                                    </p>
+                                )}
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <div className="modal-footer" style={{ gap: '0.5rem' }}>
-                    <button
-                        onClick={onClose}
-                        className="btn-primary"
-                        style={{ padding: '0.4rem 1rem', fontSize: '0.9rem', minWidth: 'auto' }}
-                    >
-                        Close
-                    </button>
+                        <div className="setting-section">
+                            <h3>Character LODs Thanos</h3>
+                            <div className="setting-group">
+                                {lodDisablerMod ? (
+                                    <>
+                                        <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                                            Disable character LODs to prevent texture mods from being reverted to vanilla textures from a far distance.
+                                        </p>
+                                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                                            <Switch
+                                                checked={lodDisablerMod.enabled}
+                                                onChange={() => {
+                                                    const pathStr = typeof lodDisablerMod.path === 'string'
+                                                        ? lodDisablerMod.path
+                                                        : String(lodDisablerMod.path);
+                                                    console.log('Toggling LOD mod:', pathStr);
+
+                                                    // Show Thanos snap when ENABLING (currently disabled)
+                                                    if (!lodDisablerMod.enabled) {
+                                                        const timestamp = Date.now();
+                                                        setThanosIsFading(false);
+                                                        setShowThanosSnap(timestamp);
+                                                        // Timer starts in onLoad handler after GIF is loaded
+                                                    }
+
+                                                    onToggleMod?.(pathStr);
+                                                }}
+                                            />
+                                            <span style={{ fontSize: '0.9rem' }}>
+                                                {lodDisablerMod.enabled ? 'LODs Disabled (Mod enabled)' : 'LODs Enabled (Default: best performance)'}
+                                            </span>
+                                        </div>
+                                        <p style={{ fontSize: '0.75rem', opacity: 0.5, marginTop: '0.5rem' }}>
+                                            Mod: {lodModDisplayName}
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <p style={{ fontSize: '0.9rem', opacity: 0.7, marginBottom: '0.5rem' }}>
+                                            No LOD Disabler mod found. Install the <span
+                                                onClick={() => open('https://www.nexusmods.com/marvelrivals/mods/5303')}
+                                                style={{ color: 'var(--accent-primary)', textDecoration: 'underline', cursor: 'pointer' }}
+                                            >Character LODs Disabler</span> mod to use this feature.
+                                        </p>
+                                        <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', opacity: 0.5 }}>
+                                            <Switch
+                                                isOn={false}
+                                                onToggle={() => { }}
+                                                disabled={true}
+                                            />
+                                            <span style={{ fontSize: '0.9rem' }}>LOD Thanos (Not Available)</span>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="modal-footer" style={{ gap: '0.5rem' }}>
+                        <button
+                            onClick={onClose}
+                            className="btn-primary"
+                            style={{ padding: '0.4rem 1rem', fontSize: '0.9rem', minWidth: 'auto' }}
+                        >
+                            Close
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
+
+            {/* Thanos Snap Easter Egg */}
+            {
+                showThanosSnap && (
+                    <div
+                        style={{
+                            position: 'fixed',
+                            inset: 0,
+                            zIndex: 9999999,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            background: 'rgba(0, 0, 0, 0.7)',
+                            backdropFilter: 'blur(4px)',
+                            opacity: thanosIsFading ? 0 : 1,
+                            transition: 'opacity 0.5s ease-out'
+                        }}
+                        onClick={() => setShowThanosSnap(null)}
+                    >
+                        <img
+                            key={showThanosSnap}
+                            src={`https://i.imgur.com/RsIL6sH.gif?t=${showThanosSnap}`}
+                            alt="Thanos Snap"
+                            onLoad={() => {
+                                // Start fade-out timer only after GIF is fully loaded
+                                setTimeout(() => setThanosIsFading(true), 1250);
+                                setTimeout(() => {
+                                    setShowThanosSnap(null);
+                                    setThanosIsFading(false);
+                                }, 2100);
+                            }}
+                            style={{
+                                maxWidth: '80%',
+                                maxHeight: '80%',
+                                borderRadius: '12px',
+                                boxShadow: '0 0 60px rgba(185, 185, 185, 0.5)'
+                            }}
+                        />
+                    </div>
+                )}
+        </>
     );
 }
 

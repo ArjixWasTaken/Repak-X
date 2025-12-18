@@ -1,5 +1,5 @@
-/* Extension Mod Overlay - for mods from browser extension */
-.extension-overlay {
+/* Quick Organize Overlay - for PAKs with no UAssets (Audio/Config) */
+.quick-organize-overlay {
     position: fixed;
     inset: 0;
     z-index: 99999;
@@ -12,10 +12,10 @@
     padding: 2rem;
 }
 
-.extension-panel {
+.quick-organize-panel {
     width: 100%;
-    max-width: 500px;
-    max-height: 80vh;
+    max-width: 520px;
+    max-height: 85vh;
     background: var(--panel-bg);
     border: 1px solid var(--panel-border);
     border-radius: 16px;
@@ -27,51 +27,49 @@
         0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
-/* Header */
-.extension-header {
+/* Header - Orange/Amber accent for Audio/Config */
+.qo-header {
     display: flex;
     align-items: center;
     gap: 1rem;
     padding: 1.25rem 1.5rem;
     background: linear-gradient(135deg,
-            color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 85%),
+            rgba(255, 160, 0, 0.12),
             transparent);
     border-bottom: 1px solid var(--panel-border);
 }
 
-.extension-icon {
+.qo-icon {
     width: 48px;
     height: 48px;
     border-radius: 12px;
-    background: linear-gradient(135deg, var(--accent-primary, #4a9eff), color-mix(in srgb, var(--accent-primary, #4a9eff), #8b5cf6 50%));
+    background: linear-gradient(135deg, #ffa000, #ff6d00);
     display: flex;
     align-items: center;
     justify-content: center;
     font-size: 1.5rem;
     color: white;
     flex-shrink: 0;
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 60%);
+    box-shadow: 0 4px 12px rgba(255, 160, 0, 0.4);
 }
 
-.extension-title {
+.qo-title {
     flex: 1;
     min-width: 0;
 }
 
-.extension-title h2 {
+.qo-title h2 {
     margin: 0;
     font-size: 1.1rem;
     font-weight: 600;
     color: var(--text-primary);
 }
 
-.extension-title .file-name {
+.qo-title .file-info {
     margin: 0.25rem 0 0;
     font-size: 0.85rem;
-    color: var(--text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    color: #ffa000;
+    font-weight: 500;
 }
 
 .close-btn {
@@ -94,21 +92,60 @@
     color: var(--text-primary);
 }
 
+/* File List */
+.qo-file-list {
+    padding: 0.75rem 1.5rem;
+    background: rgba(255, 160, 0, 0.06);
+    border-bottom: 1px solid rgba(255, 160, 0, 0.15);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.qo-file-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.qo-file-item .file-icon {
+    font-size: 0.9rem;
+    color: #ffa000;
+    flex-shrink: 0;
+}
+
+.qo-file-item .file-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.qo-file-more {
+    font-size: 0.75rem;
+    color: #ffa000;
+    font-style: italic;
+    padding-left: 1.4rem;
+}
+
 /* Content */
-.extension-content {
+.qo-content {
     flex: 1;
     min-height: 0;
     padding: 1.5rem;
     overflow-y: auto;
 }
 
-.folder-section {
+.qo-content .folder-section {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
 }
 
-.section-header {
+.qo-content .section-header {
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -117,59 +154,59 @@
     color: var(--text-secondary);
 }
 
-.section-header svg {
+.qo-content .section-header svg {
     font-size: 1.1rem;
-    color: var(--accent-primary, #4a9eff);
+    color: #ffa000;
 }
 
 /* New Folder Button */
-.extension-panel .btn-new-folder {
+.btn-new-folder {
     margin-left: auto;
     display: flex;
     align-items: center;
     gap: 0.35rem;
     padding: 0.35rem 0.65rem;
     border-radius: 6px;
-    border: 1px solid color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 60%);
-    background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 90%);
-    color: var(--accent-primary, #4a9eff);
+    border: 1px solid rgba(255, 160, 0, 0.4);
+    background: rgba(255, 160, 0, 0.1);
+    color: #ffa000;
     font-size: 0.75rem;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s ease;
 }
 
-.extension-panel .btn-new-folder:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 80%);
-    border-color: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 40%);
+.btn-new-folder:hover:not(:disabled) {
+    background: rgba(255, 160, 0, 0.2);
+    border-color: rgba(255, 160, 0, 0.6);
 }
 
-.extension-panel .btn-new-folder:disabled {
+.btn-new-folder:disabled {
     opacity: 0.5;
     cursor: not-allowed;
 }
 
-.extension-panel .btn-new-folder svg {
+.btn-new-folder svg {
     font-size: 0.9rem;
 }
 
 /* Folder Tree */
-.extension-panel .folder-tree-container {
+.quick-organize-panel .folder-tree-container {
     background: var(--bg-dark);
     border-radius: 10px;
     padding: 0.5rem;
-    max-height: 320px;
+    max-height: 280px;
     overflow-y: auto;
 }
 
-.ext-folder-tree {
+.qo-folder-tree {
     margin-left: 0.5rem;
     border-left: 1px solid var(--panel-border);
     padding-left: 0.5rem;
 }
 
 /* Folder Items */
-.ext-folder-item {
+.qo-folder-item {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -181,21 +218,21 @@
     color: var(--text-primary);
 }
 
-.ext-folder-item:hover {
+.qo-folder-item:hover {
     background: var(--bg-lighter);
 }
 
-.ext-folder-item.selected {
-    background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 70%);
-    color: var(--accent-primary, #4a9eff);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 50%);
+.qo-folder-item.selected {
+    background: rgba(255, 160, 0, 0.2);
+    color: #ffa000;
+    box-shadow: inset 0 0 0 1px rgba(255, 160, 0, 0.4);
 }
 
-.ext-folder-item.virtual {
+.qo-folder-item.virtual {
     opacity: 0.7;
 }
 
-.ext-folder-item .folder-toggle {
+.qo-folder-item .folder-toggle {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -204,41 +241,41 @@
     opacity: 0.6;
 }
 
-.ext-folder-item .folder-icon {
+.qo-folder-item .folder-icon {
     font-size: 1.1rem;
-    color: var(--accent-primary, #4a9eff);
+    color: #ffa000;
 }
 
-.ext-folder-item .folder-name {
+.qo-folder-item .folder-name {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
-.ext-folder-item.root-item {
+.qo-folder-item.root-item {
     font-weight: 600;
     margin-bottom: 0.25rem;
 }
 
 /* Selected Hint */
-.selected-hint {
+.qo-content .selected-hint {
     margin-top: 0.75rem;
     padding: 0.6rem 1rem;
-    background: color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 88%);
-    border: 1px solid color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 75%);
+    background: rgba(255, 160, 0, 0.12);
+    border: 1px solid rgba(255, 160, 0, 0.25);
     border-radius: 8px;
     font-size: 0.8rem;
-    color: var(--accent-primary, #4a9eff);
+    color: #ffa000;
     text-align: center;
 }
 
-.selected-hint strong {
+.qo-content .selected-hint strong {
     color: var(--text-primary);
 }
 
 /* Footer */
-.extension-footer {
+.qo-footer {
     display: flex;
     gap: 0.75rem;
     padding: 1.25rem 1.5rem;
@@ -246,8 +283,8 @@
     border-top: 1px solid var(--panel-border);
 }
 
-.btn-cancel,
-.btn-install {
+.qo-footer .btn-cancel,
+.qo-footer .btn-copy {
     flex: 1;
     padding: 0.75rem 1.5rem;
     border-radius: 10px;
@@ -258,38 +295,38 @@
     border: none;
 }
 
-.btn-cancel {
+.qo-footer .btn-cancel {
     background: var(--bg-lighter);
     color: var(--text-secondary);
     border: 1px solid var(--panel-border);
 }
 
-.btn-cancel:hover {
+.qo-footer .btn-cancel:hover {
     background: var(--panel-border);
     color: var(--text-primary);
 }
 
-.btn-install {
-    background: linear-gradient(135deg, var(--accent-primary, #4a9eff), color-mix(in srgb, var(--accent-primary, #4a9eff), #8b5cf6 40%));
+.qo-footer .btn-copy {
+    background: linear-gradient(135deg, #ffa000, #ff6d00);
     color: white;
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 60%);
+    box-shadow: 0 4px 12px rgba(255, 160, 0, 0.4);
 }
 
-.btn-install:hover:not(:disabled) {
+.qo-footer .btn-copy:hover:not(:disabled) {
     transform: translateY(-1px);
-    box-shadow: 0 6px 20px color-mix(in srgb, var(--accent-primary, #4a9eff), transparent 50%);
+    box-shadow: 0 6px 20px rgba(255, 160, 0, 0.5);
 }
 
-.btn-install:disabled {
+.qo-footer .btn-copy:disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }
 
-.btn-install.loading {
-    animation: pulse 1.5s infinite;
+.qo-footer .btn-copy.loading {
+    animation: qo-pulse 1.5s infinite;
 }
 
-@keyframes pulse {
+@keyframes qo-pulse {
 
     0%,
     100% {
@@ -302,40 +339,39 @@
 }
 
 /* Scrollbar */
-.extension-panel .folder-tree-container::-webkit-scrollbar {
+.quick-organize-panel .folder-tree-container::-webkit-scrollbar,
+.qo-file-list::-webkit-scrollbar {
     width: 6px;
 }
 
-.extension-panel .folder-tree-container::-webkit-scrollbar-track {
+.quick-organize-panel .folder-tree-container::-webkit-scrollbar-track,
+.qo-file-list::-webkit-scrollbar-track {
     background: transparent;
 }
 
-.extension-panel .folder-tree-container::-webkit-scrollbar-thumb {
+.quick-organize-panel .folder-tree-container::-webkit-scrollbar-thumb,
+.qo-file-list::-webkit-scrollbar-thumb {
     background: var(--text-secondary);
     opacity: 0.3;
     border-radius: 3px;
 }
 
-.extension-panel .folder-tree-container::-webkit-scrollbar-thumb:hover {
-    opacity: 0.5;
-}
-
 /* Responsive */
 @media (max-width: 540px) {
-    .extension-panel {
+    .quick-organize-panel {
         max-width: 100%;
         margin: 1rem;
     }
 
-    .extension-header {
+    .qo-header {
         padding: 1rem;
     }
 
-    .extension-content {
+    .qo-content {
         padding: 1rem;
     }
 
-    .extension-footer {
+    .qo-footer {
         padding: 1rem;
     }
 }

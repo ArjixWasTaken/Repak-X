@@ -37,6 +37,8 @@ import ContextMenu from './components/ContextMenu'
 import LogDrawer from './components/LogDrawer'
 import DropZoneOverlay from './components/DropZoneOverlay'
 import ExtensionModOverlay from './components/ExtensionModOverlay'
+import QuickOrganizeOverlay from './components/QuickOrganizeOverlay'
+import InputPromptModal from './components/InputPromptModal'
 import { AuroraText } from './components/ui/AuroraText'
 import Switch from './components/ui/Switch'
 import NumberInput from './components/ui/NumberInput'
@@ -155,6 +157,8 @@ function App() {
   const [dropTargetFolder, setDropTargetFolder] = useState(null)
   const [renamingModPath, setRenamingModPath] = useState(null) // Track which mod should start inline renaming
   const [extensionModPath, setExtensionModPath] = useState(null) // Path of mod received from browser extension
+  const [quickOrganizePaths, setQuickOrganizePaths] = useState(null) // Paths of PAKs to quick-organize (no uassets)
+  const [newFolderPrompt, setNewFolderPrompt] = useState(null) // {paths: []} when prompting for new folder name
   const dropTargetFolderRef = useRef(null)
 
   const handleCheckClashes = async () => {
@@ -283,6 +287,14 @@ function App() {
       // Check if we should quick-organize to a folder (using ref for current value in closure)
       const targetFolder = dropTargetFolderRef.current
       if (targetFolder) {
+        // Special case: user dropped on "New Folder" target
+        if (targetFolder === '__NEW_FOLDER__') {
+          // Show the custom folder name prompt modal
+          setNewFolderPrompt({ paths })
+          setDropTargetFolder(null)
+          return
+        }
+
         // Quick organize: directly install to the folder without showing install panel
         console.log('Quick organizing to folder:', targetFolder)
         setStatus(`Quick installing ${paths.length} item(s) to ${targetFolder}...`)
@@ -311,6 +323,18 @@ function App() {
           return
         }
         console.log('Parsed mods:', modsData)
+
+        // Check if ALL mods are PAK files with no uassets - if so, use quick organize
+        const allPaksWithNoUassets = modsData.every(mod =>
+          mod.is_dir === false && mod.contains_uassets === false
+        )
+
+        if (allPaksWithNoUassets && modsData.length > 0) {
+          // Skip install panel, show quick organize folder picker
+          console.log('All mods are PAKs with no uassets, using quick organize')
+          setQuickOrganizePaths(paths)
+          return
+        }
 
         // Normal drop: show install panel
         setModsToInstall(modsData)
@@ -668,7 +692,27 @@ function App() {
     try {
       const newState = await invoke('toggle_mod', { modPath })
       setStatus(newState ? 'Mod enabled' : 'Mod disabled')
+
+      // Extract the base name (without extension) to find the mod after toggle
+      // The path changes from .pak to .bak_repak or vice versa
+      const baseName = modPath.replace(/\.(pak|bak_repak)$/i, '')
+
       await loadMods()
+
+      // Update selectedMod if the toggled mod was selected
+      // Find the mod by matching the base path (without extension)
+      if (selectedMod && selectedMod.path === modPath) {
+        // After loadMods, mods state is updated - find the matching mod
+        setMods(prevMods => {
+          const updatedMod = prevMods.find(m =>
+            m.path.replace(/\.(pak|bak_repak)$/i, '') === baseName
+          )
+          if (updatedMod) {
+            setSelectedMod(updatedMod)
+          }
+          return prevMods
+        })
+      }
     } catch (error) {
       setStatus('Error toggling mod: ' + error)
     }
@@ -684,6 +728,47 @@ function App() {
       setStatus('Folder created')
     } catch (error) {
       setStatus('Error creating folder: ' + error)
+    }
+  }
+
+  // Create a folder and return its ID (for use by overlay components)
+  const handleCreateFolderAndReturn = async (name) => {
+    if (!name) throw new Error('Folder name is required')
+
+    try {
+      await invoke('create_folder', { name })
+      await loadFolders()
+      setStatus('Folder created')
+      // The folder ID is just the folder name
+      return name
+    } catch (error) {
+      setStatus('Error creating folder: ' + error)
+      throw error
+    }
+  }
+
+  // Handle new folder prompt confirmation (from drop zone)
+  const handleNewFolderConfirm = async (folderName) => {
+    if (!newFolderPrompt || !newFolderPrompt.paths) return
+
+    const paths = newFolderPrompt.paths
+    setNewFolderPrompt(null) // Close the modal
+
+    try {
+      setStatus(`Creating folder "${folderName}"...`)
+      // Create the folder first
+      await invoke('create_folder', { name: folderName })
+      await loadFolders()
+
+      // Then quick organize to the new folder
+      setStatus(`Installing ${paths.length} item(s) to "${folderName}"...`)
+      await invoke('quick_organize', { paths, targetFolder: folderName })
+      setStatus(`Installed ${paths.length} item(s) to "${folderName}"!`)
+      await loadMods()
+      await loadFolders()
+    } catch (error) {
+      console.error('New folder install error:', error)
+      setStatus(`Error: ${error}`)
     }
   }
 
@@ -855,6 +940,29 @@ function App() {
     }
   }
 
+  // Handle quick organize for PAKs with no uassets (skips install panel)
+  const handleQuickOrganizeInstall = async (targetFolderId) => {
+    if (!quickOrganizePaths || quickOrganizePaths.length === 0) return
+
+    try {
+      setStatus(`Quick organizing ${quickOrganizePaths.length} PAK file(s)...`)
+
+      // Use quick_organize to copy the PAKs to the selected folder
+      await invoke('quick_organize', {
+        paths: quickOrganizePaths,
+        targetFolder: targetFolderId || null
+      })
+
+      setStatus(`${quickOrganizePaths.length} PAK file(s) copied successfully!`)
+      setQuickOrganizePaths(null) // Close the overlay
+      await loadMods()
+      await loadFolders()
+    } catch (error) {
+      console.error('Quick organize error:', error)
+      setStatus(`Error copying PAK files: ${error}`)
+    }
+  }
+
   const handleDragStart = (e, mod) => {
     if (gameRunning) {
       e.preventDefault()
@@ -966,11 +1074,17 @@ function App() {
 
   // Compute base filtered mods (excluding folder filter)
   const baseFilteredMods = mods.filter(mod => {
+    // Hide LODs_Disabler mods from the list - they are controlled via Tools panel
+    const modName = mod.mod_name || mod.custom_name || mod.path.split('\\').pop() || ''
+    if (modName.toLowerCase().includes('lods_disabler') || mod.path.toLowerCase().includes('lods_disabler')) {
+      return false
+    }
+
     // Search query
     if (searchQuery) {
       const query = searchQuery.toLowerCase()
-      const modName = (mod.custom_name || mod.path.split('\\').pop()).toLowerCase()
-      if (!modName.includes(query)) return false
+      const displayName = (mod.custom_name || mod.path.split('\\').pop()).toLowerCase()
+      if (!displayName.includes(query)) return false
     }
 
     const modTags = toTagArray(mod.custom_tags)
@@ -1185,6 +1299,8 @@ function App() {
       {showToolsPanel && (
         <ToolsPanel
           onClose={() => setShowToolsPanel(false)}
+          mods={mods}
+          onToggleMod={handleToggleMod}
         />
       )}
 
@@ -1209,7 +1325,12 @@ function App() {
           // Store the target folder for when Tauri fires the drop event
           setDropTargetFolder(folderId)
         }}
+        onNewFolderDrop={() => {
+          // Special marker to indicate we should prompt for new folder on drop
+          setDropTargetFolder('__NEW_FOLDER__')
+        }}
         onClose={() => setIsDragging(false)}
+        onCreateFolder={handleCreateFolderAndReturn}
       />
 
       {/* Extension Mod Overlay - for mods received from browser extension */}
@@ -1219,6 +1340,30 @@ function App() {
         folders={folders}
         onInstall={handleExtensionModInstall}
         onCancel={() => setExtensionModPath(null)}
+        onCreateFolder={handleCreateFolderAndReturn}
+      />
+
+      {/* Quick Organize Overlay - for PAK files with no uassets */}
+      <QuickOrganizeOverlay
+        isVisible={!!quickOrganizePaths && quickOrganizePaths.length > 0}
+        paths={quickOrganizePaths || []}
+        folders={folders}
+        onInstall={handleQuickOrganizeInstall}
+        onCancel={() => setQuickOrganizePaths(null)}
+        onCreateFolder={handleCreateFolderAndReturn}
+      />
+
+      {/* New Folder Prompt Modal - for creating folders during drop */}
+      <InputPromptModal
+        isOpen={!!newFolderPrompt}
+        title="Create New Folder"
+        placeholder="Enter folder name..."
+        confirmText="Create & Install"
+        onConfirm={handleNewFolderConfirm}
+        onCancel={() => {
+          setNewFolderPrompt(null)
+          setStatus('Folder creation cancelled')
+        }}
       />
 
 
@@ -1665,6 +1810,7 @@ function App() {
               }
             }}
             allTags={allTags}
+            gamePath={gamePath}
           />
         )
       }

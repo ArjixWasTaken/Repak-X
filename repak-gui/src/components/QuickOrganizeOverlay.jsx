@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { VscFolder, VscFolderOpened, VscChevronRight, VscChevronDown, VscClose, VscNewFolder } from 'react-icons/vsc';
-import { MdExtension, MdCreateNewFolder } from 'react-icons/md';
-import './ExtensionModOverlay.css';
+import { MdContentCopy, MdCreateNewFolder } from 'react-icons/md';
+import { BsFiletypeRaw } from 'react-icons/bs';
+import './QuickOrganizeOverlay.css';
 
-// Simplified folder tree for the overlay (reusing logic from DropZoneOverlay)
+// Simplified folder tree (reusing logic from ExtensionModOverlay)
 const buildTree = (folders) => {
     const root = { id: 'root', name: 'root', children: {}, isVirtual: true };
     const sortedFolders = [...folders].sort((a, b) => a.name.localeCompare(b.name));
@@ -61,9 +62,9 @@ const FolderNode = ({ node, selectedFolderId, onSelect, depth = 0 }) => {
     };
 
     return (
-        <div className="ext-folder-node">
+        <div className="qo-folder-node">
             <div
-                className={`ext-folder-item ${isSelected ? 'selected' : ''} ${node.isVirtual ? 'virtual' : ''}`}
+                className={`qo-folder-item ${isSelected ? 'selected' : ''} ${node.isVirtual ? 'virtual' : ''}`}
                 onClick={handleClick}
                 style={{ paddingLeft: `${depth * 16 + 8}px` }}
             >
@@ -77,7 +78,7 @@ const FolderNode = ({ node, selectedFolderId, onSelect, depth = 0 }) => {
             </div>
 
             {hasChildren && isOpen && (
-                <div className="ext-folder-children">
+                <div className="qo-folder-children">
                     {node.children.map(child => (
                         <FolderNode
                             key={child.fullPath || child.id}
@@ -93,9 +94,9 @@ const FolderNode = ({ node, selectedFolderId, onSelect, depth = 0 }) => {
     );
 };
 
-const ExtensionModOverlay = ({
+const QuickOrganizeOverlay = ({
     isVisible,
-    filePath,
+    paths = [],
     folders = [],
     onInstall,
     onCancel,
@@ -113,12 +114,14 @@ const ExtensionModOverlay = ({
         return convertToArray(root);
     }, [subfolders]);
 
-    // Extract filename from path
-    const fileName = useMemo(() => {
-        if (!filePath) return 'Unknown file';
-        const parts = filePath.split(/[/\\]/);
-        return parts[parts.length - 1];
-    }, [filePath]);
+    // Extract filenames from paths
+    const fileNames = useMemo(() => {
+        if (!paths || paths.length === 0) return [];
+        return paths.map(p => {
+            const parts = p.split(/[/\\]/);
+            return parts[parts.length - 1];
+        });
+    }, [paths]);
 
     // Reset state when overlay becomes visible
     useEffect(() => {
@@ -135,14 +138,13 @@ const ExtensionModOverlay = ({
         try {
             await onInstall(selectedFolderId);
         } catch (err) {
-            console.error('Install failed:', err);
+            console.error('Quick organize failed:', err);
         } finally {
             setIsInstalling(false);
         }
     };
 
     const handleBackdropClick = (e) => {
-        // Only close if clicking the backdrop itself
         if (e.target === e.currentTarget) {
             onCancel();
         }
@@ -171,7 +173,7 @@ const ExtensionModOverlay = ({
         <AnimatePresence>
             {isVisible && (
                 <motion.div
-                    className="extension-overlay"
+                    className="quick-organize-overlay"
                     initial={{ opacity: 0 }}
                     animate={{ opacity: 1 }}
                     exit={{ opacity: 0 }}
@@ -179,32 +181,51 @@ const ExtensionModOverlay = ({
                     onClick={handleBackdropClick}
                 >
                     <motion.div
-                        className="extension-panel"
+                        className="quick-organize-panel"
                         initial={{ y: 50, opacity: 0, scale: 0.95 }}
                         animate={{ y: 0, opacity: 1, scale: 1 }}
                         exit={{ y: 50, opacity: 0, scale: 0.95 }}
                         transition={{ duration: 0.25, ease: 'easeOut' }}
                     >
                         {/* Header */}
-                        <div className="extension-header">
-                            <div className="extension-icon">
-                                <MdExtension />
+                        <div className="qo-header">
+                            <div className="qo-icon">
+                                <BsFiletypeRaw />
                             </div>
-                            <div className="extension-title">
-                                <h2>Mod from Repak X Extension</h2>
-                                <p className="file-name" title={filePath}>{fileName}</p>
+                            <div className="qo-title">
+                                <h2>Quick Copy - No Processing Needed</h2>
+                                <p className="file-info">
+                                    {paths.length} PAK file{paths.length > 1 ? 's' : ''} (Audio/Config)
+                                </p>
                             </div>
                             <button className="close-btn" onClick={onCancel}>
                                 <VscClose />
                             </button>
                         </div>
 
+                        {/* File List */}
+                        {fileNames.length > 0 && (
+                            <div className="qo-file-list">
+                                {fileNames.slice(0, 5).map((name, idx) => (
+                                    <div key={idx} className="qo-file-item">
+                                        <MdContentCopy className="file-icon" />
+                                        <span className="file-name">{name}</span>
+                                    </div>
+                                ))}
+                                {fileNames.length > 5 && (
+                                    <div className="qo-file-more">
+                                        +{fileNames.length - 5} more file(s)
+                                    </div>
+                                )}
+                            </div>
+                        )}
+
                         {/* Content */}
-                        <div className="extension-content">
+                        <div className="qo-content">
                             <div className="folder-section">
                                 <div className="section-header">
                                     <MdCreateNewFolder />
-                                    <span>Choose installation folder</span>
+                                    <span>Choose destination folder</span>
                                     <button
                                         className="btn-new-folder"
                                         onClick={handleNewFolder}
@@ -220,7 +241,7 @@ const ExtensionModOverlay = ({
                                     {/* Root folder */}
                                     {rootFolder && (
                                         <div
-                                            className={`ext-folder-item root-item ${selectedFolderId === rootFolder.id ? 'selected' : ''}`}
+                                            className={`qo-folder-item root-item ${selectedFolderId === rootFolder.id ? 'selected' : ''}`}
                                             onClick={() => setSelectedFolderId(rootFolder.id)}
                                         >
                                             <span className="folder-icon"><VscFolderOpened /></span>
@@ -229,7 +250,7 @@ const ExtensionModOverlay = ({
                                     )}
 
                                     {/* Subfolders */}
-                                    <div className="ext-folder-tree">
+                                    <div className="qo-folder-tree">
                                         {treeData.map(node => (
                                             <FolderNode
                                                 key={node.fullPath || node.id}
@@ -243,23 +264,23 @@ const ExtensionModOverlay = ({
 
                                 {selectedFolderId && (
                                     <div className="selected-hint">
-                                        Installing to: <strong>{selectedFolderId}</strong>
+                                        Copying to: <strong>{selectedFolderId}</strong>
                                     </div>
                                 )}
                             </div>
                         </div>
 
                         {/* Footer */}
-                        <div className="extension-footer">
+                        <div className="qo-footer">
                             <button className="btn-cancel" onClick={onCancel}>
                                 Cancel
                             </button>
                             <button
-                                className={`btn-install ${isInstalling ? 'loading' : ''}`}
+                                className={`btn-copy ${isInstalling ? 'loading' : ''}`}
                                 onClick={handleInstall}
                                 disabled={isInstalling}
                             >
-                                {isInstalling ? 'Installing...' : 'Install Mod'}
+                                {isInstalling ? 'Copying...' : `Copy ${paths.length} File${paths.length > 1 ? 's' : ''}`}
                             </button>
                         </div>
                     </motion.div>
@@ -269,4 +290,4 @@ const ExtensionModOverlay = ({
     );
 };
 
-export default ExtensionModOverlay;
+export default QuickOrganizeOverlay;

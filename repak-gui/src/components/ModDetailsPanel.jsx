@@ -180,6 +180,10 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
                 {details.is_iostore && (
                   <div className="iostore-badge">IoStore Package</div>
                 )}
+                {/* No UAssets badge - show if mod has no .uasset files (but not for IoStore bundles) */}
+                {!details.is_iostore && details.files && details.files.length > 0 && !details.files.some(f => f.toLowerCase().endsWith('.uasset')) && (
+                  <div className="no-uassets-badge" title="This mod contains no UAsset files">No UAssets</div>
+                )}
               </div>
             </div>
 

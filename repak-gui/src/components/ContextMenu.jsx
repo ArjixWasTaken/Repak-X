@@ -1,10 +1,12 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import './ContextMenu.css'
 
-const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCreateFolder, folders, onDelete, onToggle, onRename, allTags }) => {
+const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCreateFolder, folders, onDelete, onToggle, onRename, allTags, gamePath }) => {
   const [isDeleting, setIsDeleting] = useState(false)
   const deleteTimeoutRef = useRef(null)
+  const menuRef = useRef(null)
+  const [adjustedPos, setAdjustedPos] = useState({ x, y })
 
   useEffect(() => {
     const handleClickOutside = () => {
@@ -19,6 +21,43 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
       if (deleteTimeoutRef.current) clearTimeout(deleteTimeoutRef.current)
     }
   }, [])
+
+  // Adjust position to prevent menu from going off-screen
+  // Using useLayoutEffect to run after DOM updates but before paint
+  useLayoutEffect(() => {
+    // First reset to original position
+    setAdjustedPos({ x, y })
+
+    // Then measure and adjust in next frame
+    requestAnimationFrame(() => {
+      if (menuRef.current) {
+        const menuRect = menuRef.current.getBoundingClientRect()
+        const viewportHeight = window.innerHeight
+        const viewportWidth = window.innerWidth
+
+        let newY = y
+        let newX = x
+
+        // If menu would go below viewport, flip it to open above cursor
+        if (y + menuRect.height > viewportHeight - 10) {
+          newY = y - menuRect.height
+        }
+
+        // If menu would go off right edge, shift it left
+        if (x + menuRect.width > viewportWidth - 10) {
+          newX = viewportWidth - menuRect.width - 10
+        }
+
+        // Ensure menu doesn't go above or to left of viewport
+        newY = Math.max(10, newY)
+        newX = Math.max(10, newX)
+
+        if (newX !== x || newY !== y) {
+          setAdjustedPos({ x: newX, y: newY })
+        }
+      }
+    })
+  }, [x, y])
 
   const handleDeleteDown = (e) => {
     e.preventDefault()
@@ -45,8 +84,35 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
 
   if (folder) {
     return (
-      <div className="context-menu" style={{ top: y, left: x }} onClick={(e) => e.stopPropagation()}>
+      <div ref={menuRef} className="context-menu" style={{ top: adjustedPos.y, left: adjustedPos.x }} onClick={(e) => e.stopPropagation()}>
         <div className="context-menu-header">{folder.name}</div>
+        <div className="context-menu-separator" />
+        <div className="context-menu-item" onClick={async () => {
+          try {
+            // Construct full folder path from gamePath + folder.id
+            const separator = gamePath?.includes('\\') ? '\\' : '/';
+            const fullPath = gamePath && folder.id ? `${gamePath}${separator}${folder.id}` : folder.id;
+            await invoke('open_in_explorer', { path: fullPath });
+          } catch (e) {
+            console.error('Failed to open folder in explorer:', e);
+          }
+          onClose();
+        }}>
+          Open in Explorer
+        </div>
+        <div className="context-menu-item" onClick={async () => {
+          onClose();
+          try {
+            // Construct full folder path from gamePath + folder.id
+            const separator = gamePath?.includes('\\') ? '\\' : '/';
+            const fullPath = gamePath && folder.id ? `${gamePath}${separator}${folder.id}` : folder.id;
+            await invoke('copy_to_clipboard', { text: fullPath });
+          } catch (e) {
+            console.error('Failed to copy folder path:', e);
+          }
+        }}>
+          Copy Path
+        </div>
         <div className="context-menu-separator" />
         <div
           className={`context-menu-item danger ${isDeleting ? 'holding' : ''}`}
@@ -64,7 +130,7 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
   if (!mod) return null
 
   return (
-    <div className="context-menu" style={{ top: y, left: x }} onClick={(e) => e.stopPropagation()}>
+    <div ref={menuRef} className="context-menu" style={{ top: adjustedPos.y, left: adjustedPos.x }} onClick={(e) => e.stopPropagation()}>
       <div className="context-menu-header">{mod.custom_name || mod.path.split('\\').pop()}</div>
 
       <div className="context-menu-item submenu-trigger">
