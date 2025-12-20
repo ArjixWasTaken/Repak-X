@@ -185,12 +185,25 @@ The `extract_mod_assets` command automatically handles:
 | Extension | Type | Extraction Method |
 |-----------|------|-------------------|
 | `.pak` | PAK file | repak extraction |
-| `.utoc` | IoStore TOC | retoc extraction |
+| `.utoc` | IoStore TOC | retoc to-legacy conversion |
 | `.ucas` | IoStore CAS | Finds corresponding .utoc and extracts |
+| `.bak_repak` | Disabled PAK file | repak extraction (treats as PAK) |
 
 ## Notes
 
 1. The extraction creates a subfolder named after the mod file (e.g., `MyMod_P.pak` → `MyMod_P/`)
-2. IoStore extraction uses the directory index to map chunks to file paths
-3. Both PAK and IoStore extraction use the Marvel Rivals AES key automatically
-4. The command returns the number of files extracted, which can be used for user feedback
+2. **IoStore extraction** converts packages back to legacy `.uasset`/`.uexp`/`.ubulk` format (not just raw chunks)
+3. **Disabled mods** with `.bak_repak` extension are handled automatically - no need to re-enable first
+4. Both PAK and IoStore extraction use the Marvel Rivals AES key automatically
+5. The command returns the number of files/packages extracted, which can be used for user feedback
+
+## Recent Fixes (Dec 2024)
+
+### Disabled Mod Extraction
+- Fixed: Disabled PAK files (`.pak.bak_repak`) can now be extracted without re-enabling
+- The mod name is properly extracted by stripping both `.bak_repak` and `.pak` extensions
+
+### IoStore Extraction  
+- Fixed: IoStore mods now properly extract all assets, not just the `chunknames` file
+- Uses the `to-legacy` conversion which rebuilds proper `.uasset`/`.uexp`/`.ubulk` files from IoStore packages
+- Falls back to directory index extraction if no packages are found (for raw IoStore containers)

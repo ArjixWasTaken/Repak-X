@@ -2502,9 +2502,10 @@ async fn extract_pak_to_destination(mod_path: String, dest_path: String) -> Resu
 
 /// Extract assets from a mod file (PAK or IoStore) to a destination directory.
 /// Automatically detects the mod type and uses the appropriate extraction method.
+/// Handles disabled mods (.bak_repak extension) by treating them as PAK files.
 /// 
 /// # Arguments
-/// * `mod_path` - Path to the mod file (.pak, .utoc)
+/// * `mod_path` - Path to the mod file (.pak, .utoc, .bak_repak)
 /// * `dest_path` - Destination directory for extracted files
 /// 
 /// # Returns
@@ -2520,9 +2521,24 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
     }
     
     let dest_dir = PathBuf::from(&dest_path);
-    let mod_name = path.file_stem()
+    
+    // Get mod name - handle .bak_repak extension specially
+    let file_name = path.file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "extracted".to_string());
+    
+    // Strip .bak_repak or other extensions to get clean mod name
+    let mod_name = if file_name.ends_with(".bak_repak") {
+        // Remove .bak_repak and then .pak to get the base name
+        file_name.trim_end_matches(".bak_repak")
+            .trim_end_matches(".pak")
+            .to_string()
+    } else {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "extracted".to_string())
+    };
+    
     let output_dir = dest_dir.join(&mod_name);
     
     // Create output directory
@@ -2591,8 +2607,42 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
             let utoc_str = utoc_path.to_string_lossy().to_string();
             Box::pin(extract_mod_assets(utoc_str, dest_path)).await
         }
+        "bak_repak" => {
+            // Disabled PAK file - extract it as a regular PAK
+            use crate::install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
+            use crate::install_mod::InstallableMod;
+            use repak::PakBuilder;
+            use repak::utils::AesKey;
+            use std::str::FromStr;
+            use std::io::BufReader;
+            
+            let file = File::open(&path).map_err(|e| e.to_string())?;
+            let aes_key = AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
+                .map_err(|e| e.to_string())?;
+            
+            let mut reader = BufReader::new(file);
+            let pak_reader = PakBuilder::new()
+                .key(aes_key.0)
+                .reader(&mut reader)
+                .map_err(|e| e.to_string())?;
+            
+            let file_count = pak_reader.files().len();
+            
+            let installable_mod = InstallableMod {
+                mod_name: mod_name.clone(),
+                mod_type: "".to_string(),
+                reader: Some(pak_reader),
+                mod_path: path.clone(),
+                ..Default::default()
+            };
+            
+            extract_pak_to_dir(&installable_mod, output_dir.clone()).map_err(|e| e.to_string())?;
+            
+            log::info!("Extracted {} files from disabled PAK to {:?}", file_count, output_dir);
+            Ok(file_count)
+        }
         _ => {
-            Err(format!("Unsupported file type: .{}. Supported: .pak, .utoc, .ucas", extension))
+            Err(format!("Unsupported file type: .{}. Supported: .pak, .utoc, .ucas, .bak_repak", extension))
         }
     }
 }
