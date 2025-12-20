@@ -434,7 +434,7 @@ pub fn is_iostore_compressed<P: AsRef<Path>>(utoc_path: P) -> Result<bool> {
 }
 
 /// Extract assets from an IoStore container to a directory.
-/// This extracts raw chunk data using the directory index.
+/// This converts IoStore packages back to legacy .uasset/.uexp/.ubulk files.
 /// 
 /// # Arguments
 /// * `utoc_path` - Path to the .utoc file
@@ -442,7 +442,7 @@ pub fn is_iostore_compressed<P: AsRef<Path>>(utoc_path: P) -> Result<bool> {
 /// * `config` - Configuration with AES keys if needed
 /// 
 /// # Returns
-/// Number of files extracted
+/// Number of packages extracted
 pub fn extract_iostore<P: AsRef<Path>, Q: AsRef<Path>>(
     utoc_path: P,
     output_dir: Q,
@@ -451,30 +451,75 @@ pub fn extract_iostore<P: AsRef<Path>, Q: AsRef<Path>>(
     let utoc_path = utoc_path.as_ref();
     let output = output_dir.as_ref();
     
-    let mut stream = BufReader::new(fs::File::open(utoc_path)?);
-    let ucas = utoc_path.with_extension("ucas");
-    
-    let toc: Toc = stream.de_ctx(config)?;
-    
     // Create output directory
     fs::create_dir_all(output)?;
     
-    let file_count = toc.file_map.len();
+    // Open the IoStore
+    let iostore = iostore::open(utoc_path, config.clone())?;
     
-    toc.file_map.keys().par_bridge().try_for_each_init(
-        || BufReader::new(fs::File::open(&ucas).unwrap()),
-        |ucas_reader, file_name| -> Result<()> {
-            let data = toc.read(ucas_reader, toc.file_map[file_name])?;
-            
-            let path = output.join(file_name);
-            let dir = path.parent().unwrap();
-            fs::create_dir_all(dir)?;
-            fs::write(path, &data)?;
-            Ok(())
-        },
-    )?;
+    // Create a file writer for the output directory
+    let file_writer = FSFileWriter::new(output);
+    let log = Log::new(false, false);
     
-    Ok(file_count)
+    // Get all packages to extract
+    let mut packages_to_extract = vec![];
+    for package_info in iostore.packages() {
+        let chunk_id = FIoChunkId::from_package_id(package_info.id(), 0, EIoChunkType::ExportBundleData);
+        if let Some(package_path) = iostore.chunk_path(chunk_id) {
+            packages_to_extract.push((package_info, package_path));
+        }
+    }
+    
+    let package_count = packages_to_extract.len();
+    
+    // If no packages found, fall back to directory index extraction
+    if package_count == 0 {
+        // Fall back to raw file extraction from directory index
+        let mut stream = BufReader::new(fs::File::open(utoc_path)?);
+        let ucas = utoc_path.with_extension("ucas");
+        let toc: Toc = stream.de_ctx(config)?;
+        
+        let file_count = toc.file_map.len();
+        
+        toc.file_map.keys().par_bridge().try_for_each_init(
+            || BufReader::new(fs::File::open(&ucas).unwrap()),
+            |ucas_reader, file_name| -> Result<()> {
+                let data = toc.read(ucas_reader, toc.file_map[file_name])?;
+                
+                let path = output.join(file_name);
+                let dir = path.parent().unwrap();
+                fs::create_dir_all(dir)?;
+                fs::write(path, &data)?;
+                Ok(())
+            },
+        )?;
+        
+        return Ok(file_count);
+    }
+    
+    // Convert packages to legacy format
+    let package_context = asset_conversion::FZenPackageContext::create(&*iostore, None, &log);
+    
+    for (package_info, package_path) in &packages_to_extract {
+        // Strip the mount point prefix (../../../)
+        let path = package_path
+            .strip_prefix("../../../")
+            .unwrap_or(package_path);
+        
+        let out_path = UEPath::new(path);
+        
+        if let Err(e) = asset_conversion::build_legacy(
+            &package_context,
+            package_info.id(),
+            &out_path,
+            &file_writer,
+        ) {
+            // Log error but continue with other packages
+            eprintln!("Failed to extract {}: {}", package_path, e);
+        }
+    }
+    
+    Ok(package_count)
 }
 
 /// Recompress an IoStore container by reading all chunks and writing them back with Oodle compression.

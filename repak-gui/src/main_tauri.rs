@@ -132,8 +132,19 @@ async fn get_game_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String,
 
 #[tauri::command]
 async fn set_game_path(path: String, state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), String> {
+    let mods_path = PathBuf::from(&path);
+    
+    // Auto-deploy bundled LOD Disabler mod if path exists
+    if mods_path.exists() {
+        match deploy_bundled_lod_mod(&mods_path) {
+            Ok(true) => info!("Auto-deployed bundled LOD Disabler mod"),
+            Ok(false) => info!("Bundled LOD Disabler mod already present or not bundled"),
+            Err(e) => warn!("Failed to auto-deploy LOD Disabler mod: {}", e),
+        }
+    }
+    
     let mut state = state.lock().unwrap();
-    state.game_path = PathBuf::from(path);
+    state.game_path = mods_path;
     save_state(&state).map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -149,6 +160,13 @@ async fn auto_detect_game_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result
             if !mods_path.exists() {
                 std::fs::create_dir_all(&mods_path)
                     .map_err(|e| format!("Failed to create ~mods directory: {}", e))?;
+            }
+            
+            // Auto-deploy bundled LOD Disabler mod
+            match deploy_bundled_lod_mod(&mods_path) {
+                Ok(true) => info!("Auto-deployed bundled LOD Disabler mod"),
+                Ok(false) => info!("Bundled LOD Disabler mod already present or not bundled"),
+                Err(e) => warn!("Failed to auto-deploy LOD Disabler mod: {}", e),
             }
             
             let mut state = state.lock().unwrap();
@@ -2484,9 +2502,10 @@ async fn extract_pak_to_destination(mod_path: String, dest_path: String) -> Resu
 
 /// Extract assets from a mod file (PAK or IoStore) to a destination directory.
 /// Automatically detects the mod type and uses the appropriate extraction method.
+/// Handles disabled mods (.bak_repak extension) by treating them as PAK files.
 /// 
 /// # Arguments
-/// * `mod_path` - Path to the mod file (.pak, .utoc)
+/// * `mod_path` - Path to the mod file (.pak, .utoc, .bak_repak)
 /// * `dest_path` - Destination directory for extracted files
 /// 
 /// # Returns
@@ -2502,9 +2521,24 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
     }
     
     let dest_dir = PathBuf::from(&dest_path);
-    let mod_name = path.file_stem()
+    
+    // Get mod name - handle .bak_repak extension specially
+    let file_name = path.file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| "extracted".to_string());
+    
+    // Strip .bak_repak or other extensions to get clean mod name
+    let mod_name = if file_name.ends_with(".bak_repak") {
+        // Remove .bak_repak and then .pak to get the base name
+        file_name.trim_end_matches(".bak_repak")
+            .trim_end_matches(".pak")
+            .to_string()
+    } else {
+        path.file_stem()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "extracted".to_string())
+    };
+    
     let output_dir = dest_dir.join(&mod_name);
     
     // Create output directory
@@ -2573,8 +2607,42 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
             let utoc_str = utoc_path.to_string_lossy().to_string();
             Box::pin(extract_mod_assets(utoc_str, dest_path)).await
         }
+        "bak_repak" => {
+            // Disabled PAK file - extract it as a regular PAK
+            use crate::install_mod::install_mod_logic::pak_files::extract_pak_to_dir;
+            use crate::install_mod::InstallableMod;
+            use repak::PakBuilder;
+            use repak::utils::AesKey;
+            use std::str::FromStr;
+            use std::io::BufReader;
+            
+            let file = File::open(&path).map_err(|e| e.to_string())?;
+            let aes_key = AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
+                .map_err(|e| e.to_string())?;
+            
+            let mut reader = BufReader::new(file);
+            let pak_reader = PakBuilder::new()
+                .key(aes_key.0)
+                .reader(&mut reader)
+                .map_err(|e| e.to_string())?;
+            
+            let file_count = pak_reader.files().len();
+            
+            let installable_mod = InstallableMod {
+                mod_name: mod_name.clone(),
+                mod_type: "".to_string(),
+                reader: Some(pak_reader),
+                mod_path: path.clone(),
+                ..Default::default()
+            };
+            
+            extract_pak_to_dir(&installable_mod, output_dir.clone()).map_err(|e| e.to_string())?;
+            
+            log::info!("Extracted {} files from disabled PAK to {:?}", file_count, output_dir);
+            Ok(file_count)
+        }
         _ => {
-            Err(format!("Unsupported file type: .{}. Supported: .pak, .utoc, .ucas", extension))
+            Err(format!("Unsupported file type: .{}. Supported: .pak, .utoc, .ucas, .bak_repak", extension))
         }
     }
 }
@@ -2864,6 +2932,119 @@ async fn get_skip_launcher_status(state: State<'_, Arc<Mutex<AppState>>>) -> Res
     };
     
     Ok(current_value == "0")
+}
+
+// ============================================================================
+// BUNDLED LOD DISABLER MOD
+// ============================================================================
+
+/// The bundled LOD Disabler mod bytes (embedded at compile time)
+/// This mod must stay as legacy PAK and NOT be converted to IoStore
+/// 
+/// To bundle the mod:
+/// 1. Download from https://www.nexusmods.com/marvelrivals/mods/5303
+/// 2. Place the .pak file at: repak-gui/src/bundled_mods/SK_LODs_Disabler_9999999_P.pak
+/// 3. Rebuild the application with --features bundled_lod_mod
+#[cfg(feature = "bundled_lod_mod")]
+const BUNDLED_LOD_DISABLER_PAK: &[u8] = include_bytes!("bundled_mods/SK_LODs_Disabler_9999999_P.pak");
+
+/// Folder name for the bundled LOD mod
+const LOD_DISABLER_FOLDER: &str = "_LOD-Disabler (Built-in)";
+
+/// Filename for the bundled LOD mod
+const LOD_DISABLER_FILENAME: &str = "SK_LODs_Disabler_9999999_P.pak";
+
+/// Check if the bundled LOD mod is available
+fn has_bundled_lod_mod() -> bool {
+    #[cfg(feature = "bundled_lod_mod")]
+    { true }
+    #[cfg(not(feature = "bundled_lod_mod"))]
+    { false }
+}
+
+/// Get the bundled LOD mod bytes if available
+fn get_bundled_lod_mod_bytes() -> Option<&'static [u8]> {
+    #[cfg(feature = "bundled_lod_mod")]
+    { Some(BUNDLED_LOD_DISABLER_PAK) }
+    #[cfg(not(feature = "bundled_lod_mod"))]
+    { None }
+}
+
+/// Deploy the bundled LOD Disabler mod to the game's mods folder
+/// Creates a special folder and copies the pak file there
+/// Returns Ok(true) if deployed, Ok(false) if already exists or not bundled, Err on failure
+fn deploy_bundled_lod_mod(mods_path: &Path) -> Result<bool, String> {
+    // Check if bundled mod is available
+    let pak_bytes = match get_bundled_lod_mod_bytes() {
+        Some(bytes) => bytes,
+        None => {
+            info!("Bundled LOD Disabler mod not included in this build");
+            return Ok(false);
+        }
+    };
+    
+    let lod_folder = mods_path.join(LOD_DISABLER_FOLDER);
+    let pak_path = lod_folder.join(LOD_DISABLER_FILENAME);
+    
+    // Check if already deployed
+    if pak_path.exists() {
+        info!("Bundled LOD Disabler mod already deployed at: {}", pak_path.display());
+        return Ok(false);
+    }
+    
+    // Create the folder
+    std::fs::create_dir_all(&lod_folder)
+        .map_err(|e| format!("Failed to create LOD Disabler folder: {}", e))?;
+    
+    // Write the bundled pak file
+    std::fs::write(&pak_path, pak_bytes)
+        .map_err(|e| format!("Failed to write LOD Disabler pak: {}", e))?;
+    
+    info!("Deployed bundled LOD Disabler mod to: {}", pak_path.display());
+    Ok(true)
+}
+
+/// Check if the bundled LOD Disabler mod is deployed
+#[tauri::command]
+async fn check_lod_disabler_deployed(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
+    let mods_path = {
+        let state = state.lock().unwrap();
+        state.game_path.clone()
+    };
+    
+    if !mods_path.exists() {
+        return Ok(false);
+    }
+    
+    let pak_path = mods_path.join(LOD_DISABLER_FOLDER).join(LOD_DISABLER_FILENAME);
+    Ok(pak_path.exists())
+}
+
+/// Get the path to the bundled LOD Disabler mod
+#[tauri::command]
+async fn get_lod_disabler_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
+    let mods_path = {
+        let state = state.lock().unwrap();
+        state.game_path.clone()
+    };
+    
+    let pak_path = mods_path.join(LOD_DISABLER_FOLDER).join(LOD_DISABLER_FILENAME);
+    Ok(pak_path.to_string_lossy().to_string())
+}
+
+/// Manually deploy the bundled LOD Disabler mod
+#[tauri::command]
+async fn deploy_lod_disabler(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
+    let mods_path = {
+        let state = state.lock().unwrap();
+        state.game_path.clone()
+    };
+    
+    if !mods_path.exists() {
+        return Err("Game path does not exist. Please set a valid mods folder first.".to_string());
+    }
+    
+    deploy_bundled_lod_mod(&mods_path)
 }
 
 /// Result of recompression operation
@@ -4344,7 +4525,11 @@ fn main() {
             p2p_is_receiving,
             p2p_create_mod_pack_preview,
             p2p_validate_connection_string,
-            p2p_hash_file
+            p2p_hash_file,
+            // Bundled LOD Disabler commands
+            check_lod_disabler_deployed,
+            get_lod_disabler_path,
+            deploy_lod_disabler
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
