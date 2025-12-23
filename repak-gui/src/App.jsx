@@ -63,16 +63,20 @@ function detectHeroes(files) {
   const filenameRegex = /[_/](10[1-6]\d)(\d{3})/
 
   files.forEach(file => {
-    // Check path
+    // Check path first - primary detection method
     const pathMatch = file.match(pathRegex)
     if (pathMatch) {
       heroIds.add(pathMatch[1])
+      return // Skip filename check to avoid false positives from shared assets
     }
 
-    // Check filename
-    const filenameMatch = file.match(filenameRegex)
-    if (filenameMatch) {
-      heroIds.add(filenameMatch[1])
+    // Fallback: Check filename only if path didn't match
+    const filename = file.split('/').pop() || ''
+    if (!filename.toLowerCase().startsWith('mi_')) {
+      const filenameMatch = filename.match(filenameRegex)
+      if (filenameMatch) {
+        heroIds.add(filenameMatch[1])
+      }
     }
   })
 
