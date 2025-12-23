@@ -1288,9 +1288,48 @@ function App() {
     const modCount = modsWithSettings.length
 
     // Use promise toast for loading state and result
+    // The backend spawns threads and returns immediately, so we need to wait
+    // for the install_complete event to know when installation is actually done
     alert.promise(
       (async () => {
+        // Create a promise that resolves when install_complete event fires
+        const installCompletePromise = new Promise((resolve, reject) => {
+          let unlistenComplete = null
+          let unlistenError = null
+          let timeoutId = null
+
+          // Set a reasonable timeout (10 minutes for large mods)
+          timeoutId = setTimeout(() => {
+            if (unlistenComplete) unlistenComplete()
+            if (unlistenError) unlistenError()
+            reject(new Error('Installation timed out after 10 minutes'))
+          }, 10 * 60 * 1000)
+
+          // Listen for success
+          listen('install_complete', () => {
+            clearTimeout(timeoutId)
+            if (unlistenComplete) unlistenComplete()
+            if (unlistenError) unlistenError()
+            resolve()
+          }).then(unlisten => { unlistenComplete = unlisten })
+
+          // Listen for failure (from toast_events via toast_notification)
+          listen('toast_notification', (event) => {
+            // Check if this is an installation failure toast
+            if (event.payload?.title === 'Installation Failed') {
+              clearTimeout(timeoutId)
+              if (unlistenComplete) unlistenComplete()
+              if (unlistenError) unlistenError()
+              reject(new Error(event.payload?.description || 'Installation failed'))
+            }
+          }).then(unlisten => { unlistenError = unlisten })
+        })
+
+        // Start the installation (returns immediately since backend spawns threads)
         await invoke('install_mods', { mods: modsWithSettings })
+
+        // Wait for the actual installation to complete
+        await installCompletePromise
 
         // Mirror tag assignment flow used by the main list/context menu
         const typeTracker = {}
