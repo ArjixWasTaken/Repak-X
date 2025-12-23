@@ -17,6 +17,7 @@ mod p2p_security;
 mod p2p_stream;
 mod p2p_protocol;
 mod ip_obfuscation;
+mod toast_events;
 
 use uasset_detection::{detect_mesh_files_async, detect_texture_files_async, detect_static_mesh_files_async};
 use log::{info, warn, error};
@@ -61,6 +62,9 @@ struct AppState {
     auto_check_updates: bool,
     hide_internal_suffix: bool,
     custom_tag_catalog: Vec<String>,
+    /// Last known crash folder name for detecting crashes from previous sessions
+    #[serde(default)]
+    last_known_crash_folder: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -150,7 +154,7 @@ async fn set_game_path(path: String, state: State<'_, Arc<Mutex<AppState>>>) -> 
 }
 
 #[tauri::command]
-async fn auto_detect_game_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
+async fn auto_detect_game_path(state: State<'_, Arc<Mutex<AppState>>>, window: Window) -> Result<String, String> {
     match find_marvel_rivals() {
         Some(game_root) => {
             // game_path should be the ~mods directory (matching egui behavior)
@@ -158,8 +162,11 @@ async fn auto_detect_game_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result
             
             // Create ~mods directory if it doesn't exist
             if !mods_path.exists() {
-                std::fs::create_dir_all(&mods_path)
-                    .map_err(|e| format!("Failed to create ~mods directory: {}", e))?;
+                if let Err(e) = std::fs::create_dir_all(&mods_path) {
+                    let error_msg = format!("Failed to create ~mods directory: {}", e);
+                    toast_events::emit_game_path_failed(&window, &error_msg);
+                    return Err(error_msg);
+                }
             }
             
             // Auto-deploy bundled LOD Disabler mod
@@ -174,7 +181,11 @@ async fn auto_detect_game_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result
             save_state(&state).map_err(|e| e.to_string())?;
             Ok(mods_path.to_string_lossy().to_string())
         }
-        None => Err("Could not auto-detect Marvel Rivals installation".to_string()),
+        None => {
+            let error_msg = "Could not auto-detect Marvel Rivals installation".to_string();
+            toast_events::emit_game_path_failed(&window, &error_msg);
+            Err(error_msg)
+        }
     }
 }
 
@@ -1561,7 +1572,9 @@ async fn install_mods(
         let _ = window.emit("install_log", "  - PAK file couldn't be read (wrong AES key or corrupted)");
         let _ = window.emit("install_log", "  - Archive contains no .pak files or content folders");
         let _ = window.emit("install_log", "  - Directory contains no valid content");
-        return Err("No valid mods found to install. Check the install logs for details.".to_string());
+        let error_msg = "No valid mods found to install. Check the install logs for details.";
+        toast_events::emit_installation_failed(&window, error_msg);
+        return Err(error_msg.to_string());
     }
 
     // Apply user settings to each mod
@@ -1646,7 +1659,8 @@ async fn install_mods(
                 } else {
                     "PANIC: Unknown error".to_string()
                 };
-                window_for_logs.emit("install_log", msg).ok();
+                window_for_logs.emit("install_log", &msg).ok();
+                toast_events::emit_installation_failed(&window_for_logs, &msg);
                 error!("Installation thread panicked!");
             }
         }
@@ -1670,13 +1684,16 @@ async fn install_mods(
 }
 
 #[tauri::command]
-async fn delete_mod(path: String) -> Result<(), String> {
+async fn delete_mod(path: String, window: Window) -> Result<(), String> {
     let path_buf = PathBuf::from(&path);
     
     // Try to delete the main file
     if path_buf.exists() {
-        std::fs::remove_file(&path_buf)
-            .map_err(|e| format!("Failed to delete mod file: {}", e))?;
+        if let Err(e) = std::fs::remove_file(&path_buf) {
+            let error_msg = format!("Failed to delete mod file: {}", e);
+            toast_events::emit_delete_failed(&window, &error_msg);
+            return Err(error_msg);
+        }
     }
 
     // If it's a .pak file, try to delete associated IOStore files
@@ -1767,7 +1784,6 @@ async fn copy_to_clipboard(text: String, window: Window) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::process::{Command, Stdio};
-        use std::io::Write;
         
         let mut child = Command::new("powershell")
             .args(["-Command", "Set-Clipboard", "-Value", &format!("'{}'", text.replace("'", "''"))])
@@ -1840,13 +1856,15 @@ async fn copy_to_clipboard(text: String, window: Window) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn rename_mod(mod_path: String, new_name: String) -> Result<String, String> {
+async fn rename_mod(mod_path: String, new_name: String, window: Window) -> Result<String, String> {
     let old_path_buf = PathBuf::from(&mod_path);
     
     info!("rename_mod called: mod_path={}, new_name={}", mod_path, new_name);
     
     if !old_path_buf.exists() {
-        return Err(format!("File does not exist: {}", mod_path));
+        let error_msg = format!("File does not exist: {}", mod_path);
+        toast_events::emit_rename_failed(&window, &error_msg);
+        return Err(error_msg);
     }
     
     // Get the parent directory
@@ -1912,7 +1930,9 @@ async fn rename_mod(mod_path: String, new_name: String) -> Result<String, String
     let new_path = parent.join(&new_file_name);
     
     if new_path.exists() {
-        return Err(format!("A file with name '{}' already exists", new_file_name));
+        let error_msg = format!("A file with name '{}' already exists", new_file_name);
+        toast_events::emit_rename_failed(&window, &error_msg);
+        return Err(error_msg);
     }
     
     // If it's a .pak or .bak_repak file, rename associated IoStore files (.ucas, .utoc) FIRST
@@ -1942,8 +1962,11 @@ async fn rename_mod(mod_path: String, new_name: String) -> Result<String, String
     }
     
     // Rename the main file
-    std::fs::rename(&old_path_buf, &new_path)
-        .map_err(|e| format!("Failed to rename file: {}", e))?;
+    if let Err(e) = std::fs::rename(&old_path_buf, &new_path) {
+        let error_msg = format!("Failed to rename file: {}", e);
+        toast_events::emit_rename_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
     
     info!("rename_mod: successfully renamed {} to {}", mod_path, new_path.display());
     
@@ -1951,7 +1974,7 @@ async fn rename_mod(mod_path: String, new_name: String) -> Result<String, String
 }
 
 #[tauri::command]
-async fn create_folder(name: String, state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
+async fn create_folder(name: String, state: State<'_, Arc<Mutex<AppState>>>, window: Window) -> Result<String, String> {
     let state = state.lock().unwrap();
     let game_path = &state.game_path;
     
@@ -1959,12 +1982,17 @@ async fn create_folder(name: String, state: State<'_, Arc<Mutex<AppState>>>) -> 
     let folder_path = game_path.join(&name);
     
     if folder_path.exists() {
-        return Err("Folder already exists".to_string());
+        let error_msg = "Folder already exists".to_string();
+        toast_events::emit_folder_create_failed(&window, &error_msg);
+        return Err(error_msg);
     }
     
     // Use create_dir_all to support nested paths like "Category/Subcategory"
-    std::fs::create_dir_all(&folder_path)
-        .map_err(|e| format!("Failed to create folder: {}", e))?;
+    if let Err(e) = std::fs::create_dir_all(&folder_path) {
+        let error_msg = format!("Failed to create folder: {}", e);
+        toast_events::emit_folder_create_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
     
     Ok(name)
 }
@@ -2139,19 +2167,24 @@ async fn update_folder(
 }
 
 #[tauri::command]
-async fn delete_folder(id: String, state: State<'_, Arc<Mutex<AppState>>>) -> Result<(), String> {
+async fn delete_folder(id: String, state: State<'_, Arc<Mutex<AppState>>>, window: Window) -> Result<(), String> {
     let state = state.lock().unwrap();
     let game_path = &state.game_path;
     
     let folder_path = game_path.join(&id);
     
     if !folder_path.exists() {
-        return Err("Folder does not exist".to_string());
+        let error_msg = "Folder does not exist".to_string();
+        toast_events::emit_folder_delete_failed(&window, &error_msg);
+        return Err(error_msg);
     }
     
     // Delete physical directory (will fail if not empty, which is good for safety)
-    std::fs::remove_dir(&folder_path)
-        .map_err(|e| format!("Failed to delete folder (may not be empty): {}", e))?;
+    if let Err(e) = std::fs::remove_dir(&folder_path) {
+        let error_msg = format!("Failed to delete folder (may not be empty): {}", e);
+        toast_events::emit_folder_delete_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
     
     Ok(())
 }
@@ -2161,13 +2194,16 @@ async fn assign_mod_to_folder(
     mod_path: String,
     folder_id: Option<String>,
     state: State<'_, Arc<Mutex<AppState>>>,
+    window: Window,
 ) -> Result<(), String> {
     let state = state.lock().unwrap();
     let game_path = &state.game_path;
     let source_path = PathBuf::from(&mod_path);
     
     if !source_path.exists() {
-        return Err("Mod file does not exist".to_string());
+        let error_msg = "Mod file does not exist".to_string();
+        toast_events::emit_move_failed(&window, &error_msg);
+        return Err(error_msg);
     }
     
     let filename = source_path.file_name()
@@ -2177,7 +2213,9 @@ async fn assign_mod_to_folder(
         // Move to folder
         let folder_path = game_path.join(&folder_name);
         if !folder_path.exists() {
-            return Err("Folder does not exist".to_string());
+            let error_msg = "Folder does not exist".to_string();
+            toast_events::emit_move_failed(&window, &error_msg);
+            return Err(error_msg);
         }
         folder_path.join(filename)
     } else {
@@ -2186,8 +2224,11 @@ async fn assign_mod_to_folder(
     };
     
     // Move the main file
-    std::fs::rename(&source_path, &dest_path)
-        .map_err(|e| format!("Failed to move mod: {}", e))?;
+    if let Err(e) = std::fs::rename(&source_path, &dest_path) {
+        let error_msg = format!("Failed to move mod: {}", e);
+        toast_events::emit_move_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
     
     // Also move .utoc and .ucas files if they exist (IoStore files)
     let utoc_source = source_path.with_extension("utoc");
@@ -2433,11 +2474,13 @@ async fn get_all_tags(state: State<'_, Arc<Mutex<AppState>>>) -> Result<Vec<Stri
 }
 
 #[tauri::command]
-async fn toggle_mod(mod_path: String) -> Result<bool, String> {
+async fn toggle_mod(mod_path: String, window: Window) -> Result<bool, String> {
     let path = PathBuf::from(&mod_path);
     
     if !path.exists() {
-        return Err("Mod file does not exist".to_string());
+        let error_msg = "Mod file does not exist".to_string();
+        toast_events::emit_toggle_failed(&window, &error_msg);
+        return Err(error_msg);
     }
     
     // Check current state
@@ -2450,8 +2493,11 @@ async fn toggle_mod(mod_path: String) -> Result<bool, String> {
         path.with_extension("pak")
     };
     
-    std::fs::rename(&path, &new_path)
-        .map_err(|e| format!("Failed to toggle mod: {}", e))?;
+    if let Err(e) = std::fs::rename(&path, &new_path) {
+        let error_msg = format!("Failed to toggle mod: {}", e);
+        toast_events::emit_toggle_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
     
     Ok(!is_enabled)
 }
@@ -2515,9 +2561,32 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
     use std::sync::Arc;
     use std::str::FromStr;
     
-    let path = PathBuf::from(&mod_path);
+    let mut path = PathBuf::from(&mod_path);
     if !path.exists() {
         return Err(format!("File not found: {}", mod_path));
+    }
+    
+    // Check if this is a PAK file with a corresponding .utoc file (IoStore mod)
+    // IoStore mods have both .pak (with just chunknames) and .utoc/.ucas (actual data)
+    let extension = path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    
+    if extension == "pak" || extension == "bak_repak" {
+        // Check if there's a .utoc file with the same name - if so, use IoStore extraction
+        // Handle .bak_repak (disabled mod) by stripping .bak_repak then .pak to get base name
+        let base_path = if extension == "bak_repak" {
+            let name = path.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+            let base_name = name.trim_end_matches(".bak_repak").trim_end_matches(".pak");
+            path.parent().map(|p| p.join(base_name)).unwrap_or_else(|| PathBuf::from(base_name))
+        } else {
+            path.with_extension("")
+        };
+        let utoc_path = base_path.with_extension("utoc");
+        if utoc_path.exists() {
+            log::info!("Detected IoStore mod (has .utoc alongside .pak/.bak_repak), using IoStore extraction");
+            path = utoc_path;
+        }
     }
     
     let dest_dir = PathBuf::from(&dest_path);
@@ -2544,6 +2613,7 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
     // Create output directory
     std::fs::create_dir_all(&output_dir).map_err(|e| e.to_string())?;
     
+    // Re-get extension after potential path change
     let extension = path.extension()
         .map(|e| e.to_string_lossy().to_lowercase())
         .unwrap_or_default();
@@ -2555,7 +2625,9 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
             let aes_key = retoc::AesKey::from_str("0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74")
                 .map_err(|e| format!("Invalid AES key: {:?}", e))?;
             config.aes_keys.insert(retoc::FGuid::default(), aes_key);
-            
+
+            // Legacy conversion now uses directory backend to resolve imports from base bundles.
+            // No ScriptObjects.bin override needed.
             let file_count = retoc::extract_iostore(&path, &output_dir, Arc::new(config))
                 .map_err(|e| format!("Failed to extract IoStore: {}", e))?;
             
@@ -2645,6 +2717,48 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
             Err(format!("Unsupported file type: .{}. Supported: .pak, .utoc, .ucas, .bak_repak", extension))
         }
     }
+}
+
+/// Extract ScriptObjects chunk from the game's IoStore bundles
+/// This is needed for proper IoStore -> Legacy conversion
+/// 
+/// # Arguments
+/// * `paks_path` - Path to the game's Paks folder containing .utoc files
+/// * `output_path` - Where to save the ScriptObjects.bin file
+/// 
+/// # Returns
+/// Size of the extracted ScriptObjects file in bytes
+#[tauri::command]
+async fn extract_script_objects(paks_path: String, output_path: String) -> Result<usize, String> {
+    use std::sync::Arc;
+    
+    log::info!("Extracting ScriptObjects from: {}", paks_path);
+    
+    // Create retoc config with AES key
+    let config = Arc::new(retoc::Config::default_with_aes(
+        "0C263D8C22DCB085894899C3A3796383E9BF9DE0CBFB08C9BF2DEF2E84F29D74"
+    ));
+    
+    // Use retoc's extract_script_objects function
+    let data = retoc::extract_script_objects(&paks_path, config)
+        .map_err(|e| format!("Failed to extract ScriptObjects: {}", e))?;
+    
+    let size = data.len();
+    log::info!("Found ScriptObjects! Size: {} bytes ({:.2} MB)", size, size as f64 / 1024.0 / 1024.0);
+    
+    // Ensure output directory exists
+    let output = std::path::PathBuf::from(&output_path);
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    }
+    
+    // Write the ScriptObjects data
+    std::fs::write(&output, &data)
+        .map_err(|e| format!("Failed to write ScriptObjects: {}", e))?;
+    
+    log::info!("ScriptObjects extracted to: {}", output_path);
+    Ok(size)
 }
 
 #[tauri::command]
@@ -2953,14 +3067,6 @@ const LOD_DISABLER_FOLDER: &str = "_LOD-Disabler (Built-in)";
 
 /// Filename for the bundled LOD mod
 const LOD_DISABLER_FILENAME: &str = "SK_LODs_Disabler_9999999_P.pak";
-
-/// Check if the bundled LOD mod is available
-fn has_bundled_lod_mod() -> bool {
-    #[cfg(feature = "bundled_lod_mod")]
-    { true }
-    #[cfg(not(feature = "bundled_lod_mod"))]
-    { false }
-}
 
 /// Get the bundled LOD mod bytes if available
 fn get_bundled_lod_mod_bytes() -> Option<&'static [u8]> {
@@ -3458,6 +3564,7 @@ struct UpdateInfo {
 #[tauri::command]
 async fn monitor_game_for_crashes(
     crash_state: State<'_, CrashMonitorState>,
+    window: Window,
 ) -> Result<Option<crash_monitor::CrashInfo>, String> {
     // Use the shared reliable game detection function
     let game_running = is_game_process_running();
@@ -3552,6 +3659,9 @@ async fn monitor_game_for_crashes(
                     
                     // Update last checked time to avoid re-reporting this crash
                     *last_checked = Some(info.timestamp);
+                    
+                    // Emit toast notification with crash details
+                    toast_events::emit_crash_from_info(&window, info);
                 }
                 
                 return Ok(crash_info);
@@ -3564,6 +3674,45 @@ async fn monitor_game_for_crashes(
     }
     
     Ok(None)
+}
+
+/// Check for crashes that occurred in previous sessions (when app wasn't running)
+/// This should be called once on app startup to detect crashes from the last game session
+#[tauri::command]
+async fn check_for_previous_crash(
+    state: State<'_, Arc<Mutex<AppState>>>,
+    window: Window,
+) -> Result<Option<crash_monitor::CrashInfo>, String> {
+    let last_known = {
+        let state_guard = state.lock().unwrap();
+        state_guard.last_known_crash_folder.clone()
+    };
+    
+    // Check for crashes since last known
+    let crash_info = crash_monitor::check_for_previous_session_crash(last_known.as_deref());
+    
+    if let Some(ref info) = crash_info {
+        error!("⚠️ ═══════════════════════════════════════════════════════════════");
+        error!("⚠️ PREVIOUS SESSION CRASH DETECTED!");
+        error!("⚠️ ═══════════════════════════════════════════════════════════════");
+        error!("⚠️ Crash folder: {:?}", info.crash_folder);
+        
+        if let Some(ref err_msg) = info.error_message {
+            error!("⚠️ Error: {}", err_msg);
+        }
+        
+        // Emit toast notification
+        toast_events::emit_crash_from_info(&window, info);
+    }
+    
+    // Update last known crash folder to the newest one (whether crash detected or not)
+    if let Some((newest_name, _)) = crash_monitor::get_newest_crash_folder() {
+        let mut state_guard = state.lock().unwrap();
+        state_guard.last_known_crash_folder = Some(newest_name);
+        let _ = save_state(&state_guard);
+    }
+    
+    Ok(crash_info)
 }
 
 #[tauri::command]
@@ -4496,6 +4645,7 @@ fn main() {
             get_app_version,
             check_for_updates,
             monitor_game_for_crashes,
+            check_for_previous_crash,
             get_crash_history,
             get_total_crashes,
             clear_crash_logs,
@@ -4506,6 +4656,7 @@ fn main() {
             check_mod_clashes,
             extract_pak_to_destination,
             extract_mod_assets,
+            extract_script_objects,
             // Character data commands
             get_character_data,
             get_character_by_skin_id,

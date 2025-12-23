@@ -66,6 +66,39 @@ pub fn open<P: AsRef<Path>>(path: P, config: Arc<Config>) -> Result<Box<dyn IoSt
     })
 }
 
+pub fn open_with_additional_container<P: AsRef<Path>, Q: AsRef<Path>>(
+    dir: P,
+    extra_utoc_path: Q,
+    config: Arc<Config>,
+) -> Result<Box<dyn IoStoreTrait>> {
+    let mut backend = IoStoreBackend::open(dir, config.clone())?;
+    backend
+        .containers
+        .insert(0, Box::new(IoStoreContainer::open(extra_utoc_path, config)?));
+    Ok(Box::new(backend))
+}
+
+pub fn open_with_preferred_container<P: AsRef<Path>>(
+    path: P,
+    preferred_container_name: &str,
+    config: Arc<Config>,
+) -> Result<Box<dyn IoStoreTrait>> {
+    Ok(if path.as_ref().is_dir() {
+        let mut backend = IoStoreBackend::open(path, config)?;
+        if let Some(idx) = backend
+            .containers
+            .iter()
+            .position(|c| c.container_name() == preferred_container_name)
+        {
+            let c = backend.containers.remove(idx);
+            backend.containers.insert(0, c);
+        }
+        Box::new(backend)
+    } else {
+        Box::new(IoStoreContainer::open(path, config)?)
+    })
+}
+
 /// Return an object that can be sorted by to achieve container priority.
 /// Higher priority should Cmp higher
 fn sort_container_name(full_name: &str) -> (bool, u32, &str) {
@@ -188,10 +221,14 @@ impl std::hash::Hash for PackageInfo<'_> {
 
 struct IoStoreBackend {
     containers: Vec<Box<dyn IoStoreTrait>>,
+    config: Arc<Config>,
 }
 impl IoStoreBackend {
     pub fn new() -> Result<Self> {
-        Ok(Self { containers: vec![] })
+        Ok(Self {
+            containers: vec![],
+            config: Arc::new(Config::default()),
+        })
     }
     pub fn open<P: AsRef<Path>>(dir: P, config: Arc<Config>) -> Result<Self> {
         let mut containers: Vec<Box<dyn IoStoreTrait>> = vec![];
@@ -238,7 +275,10 @@ impl IoStoreBackend {
         containers.sort_by(|a, b| {
             sort_container_name(b.container_name()).cmp(&sort_container_name(a.container_name()))
         });
-        Ok(Self { containers })
+        Ok(Self {
+            containers,
+            config,
+        })
     }
 }
 impl IoStoreTrait for IoStoreBackend {
@@ -322,6 +362,21 @@ impl IoStoreTrait for IoStoreBackend {
             .iter()
             .find_map(|c| c.lookup_package_redirect(source_package_id))
     }
+
+    fn load_script_objects(&self) -> Result<ZenScriptObjects> {
+        if let Some(bytes) = self.config.script_objects_override.as_ref() {
+            return ZenScriptObjects::deserialize_new(&mut Cursor::new(bytes.as_slice()));
+        }
+
+        // Containers are already sorted by priority in IoStoreBackend::open.
+        for c in &self.containers {
+            if let Ok(so) = c.load_script_objects() {
+                return Ok(so);
+            }
+        }
+
+        bail!("Failed to load ScriptObjects")
+    }
 }
 
 pub struct IoStoreContainer {
@@ -329,6 +384,8 @@ pub struct IoStoreContainer {
     path: PathBuf,
     toc: Toc,
     cas: FilePool,
+
+    config: Arc<Config>,
 
     container_header: Option<FIoContainerHeader>,
 }
@@ -347,6 +404,8 @@ impl IoStoreContainer {
             path,
             toc,
             cas,
+
+            config: config.clone(),
 
             container_header: None,
         };
@@ -473,6 +532,37 @@ impl IoStoreTrait for IoStoreContainer {
         self.container_header
             .as_ref()
             .and_then(|header| header.lookup_package_redirect(source_package_id))
+    }
+
+    fn load_script_objects(&self) -> Result<ZenScriptObjects> {
+        // First try to load from the container itself.
+        // IMPORTANT: don't early-return on missing chunks; allow fallback to override.
+        let res: Result<ZenScriptObjects> = if self.container_file_version().unwrap() > EIoStoreTocVersion::PerfectHash {
+            let chunk = FIoChunkId::create(0, 0, EIoChunkType::ScriptObjects);
+            let script_objects_data = self.read(chunk);
+            script_objects_data.and_then(|data| ZenScriptObjects::deserialize_new(&mut Cursor::new(data)))
+        } else {
+            let meta_chunk = FIoChunkId::create(0, 0, EIoChunkType::LoaderInitialLoadMeta);
+            let names_chunk = FIoChunkId::create(0, 0, EIoChunkType::LoaderGlobalNames);
+            match (self.read(meta_chunk), self.read(names_chunk)) {
+                (Ok(script_objects_data), Ok(names)) => {
+                    ZenScriptObjects::deserialize_old(&mut Cursor::new(script_objects_data), &names)
+                }
+                (Err(e), _) => Err(e),
+                (_, Err(e)) => Err(e),
+            }
+        };
+
+        if let Ok(so) = res {
+            return Ok(so);
+        }
+
+        // Fallback to override bytes if provided (extracted from base game)
+        if let Some(bytes) = self.config.script_objects_override.as_ref() {
+            return ZenScriptObjects::deserialize_new(&mut Cursor::new(bytes.as_slice()));
+        }
+
+        res
     }
 }
 

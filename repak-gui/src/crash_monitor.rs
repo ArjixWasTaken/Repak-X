@@ -16,15 +16,6 @@ pub struct CrashInfo {
     pub enabled_mods: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CrashRecord {
-    pub timestamp: String,
-    pub error_summary: String,
-    pub seconds_in_game: u64,
-    pub mods_enabled: Vec<String>,
-    pub crash_folder: PathBuf,
-}
-
 /// Get the path to Marvel Rivals crash logs directory
 pub fn get_crash_log_path() -> PathBuf {
     let local_appdata = std::env::var("LOCALAPPDATA")
@@ -267,38 +258,6 @@ pub fn count_total_crashes() -> usize {
     }
 }
 
-/// Format SystemTime to human readable string
-fn format_system_time(time: SystemTime) -> String {
-    match time.duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => {
-            // Simple timestamp formatting
-            let secs = duration.as_secs();
-            let minutes = (secs / 60) % 60;
-            let hours = (secs / 3600) % 24;
-            format!("{}h {}m ago", hours, minutes)
-        }
-        Err(_) => "Unknown time".to_string(),
-    }
-}
-
-/// Convert CrashInfo to CrashRecord for persistent storage
-pub fn crash_info_to_record(info: &CrashInfo) -> CrashRecord {
-    let timestamp_str = format_system_time(info.timestamp);
-    let error_summary = info.error_message
-        .clone()
-        .unwrap_or_else(|| "Unknown crash".to_string());
-    let seconds_in_game = info.seconds_since_start.unwrap_or(0);
-    
-    CrashRecord {
-        timestamp: timestamp_str,
-        error_summary,
-        seconds_in_game,
-        mods_enabled: info.enabled_mods.clone(),
-        crash_folder: info.crash_folder.clone(),
-    }
-}
-
-
 /// Delete all crash folders (cleanup)
 pub fn clear_all_crashes() -> Result<usize, String> {
     let crash_dir = get_crash_log_path();
@@ -329,6 +288,81 @@ pub fn clear_all_crashes() -> Result<usize, String> {
             Ok(deleted_count)
         }
         Err(e) => Err(format!("Failed to read crash directory: {}", e)),
+    }
+}
+
+/// Get the newest crash folder in the crash directory
+/// Returns (folder_name, folder_path) if found
+pub fn get_newest_crash_folder() -> Option<(String, PathBuf)> {
+    let crash_dir = get_crash_log_path();
+    
+    if !crash_dir.exists() {
+        return None;
+    }
+    
+    let mut newest: Option<(String, PathBuf, SystemTime)> = None;
+    
+    if let Ok(entries) = fs::read_dir(&crash_dir) {
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            
+            if !path.is_dir() {
+                continue;
+            }
+            
+            if let Ok(metadata) = entry.metadata() {
+                if let Ok(created) = metadata.created() {
+                    let folder_name = path.file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or("")
+                        .to_string();
+                    
+                    match &newest {
+                        Some((_, _, newest_time)) if created > *newest_time => {
+                            newest = Some((folder_name, path, created));
+                        }
+                        None => {
+                            newest = Some((folder_name, path, created));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
+    
+    newest.map(|(name, path, _)| (name, path))
+}
+
+/// Check for crashes that occurred in previous sessions (when app wasn't running)
+/// Returns crash info if a new crash is detected since last_known_crash_folder
+pub fn check_for_previous_session_crash(last_known_crash_folder: Option<&str>) -> Option<CrashInfo> {
+    let newest = get_newest_crash_folder();
+    
+    match (newest, last_known_crash_folder) {
+        (Some((newest_name, newest_path)), Some(last_known)) => {
+            // Compare folder names - if different, there's a new crash
+            if newest_name != last_known {
+                info!("New crash detected from previous session: {} (last known: {})", newest_name, last_known);
+                return parse_crash_info(&newest_path, Vec::new());
+            }
+            None
+        }
+        (Some((newest_name, newest_path)), None) => {
+            // First time running - check if crash folder exists
+            // Only report if the crash is recent (within last 24 hours)
+            if let Ok(metadata) = fs::metadata(&newest_path) {
+                if let Ok(created) = metadata.created() {
+                    let age = SystemTime::now().duration_since(created).unwrap_or_default();
+                    if age.as_secs() < 86400 { // 24 hours
+                        info!("Recent crash detected on first run: {}", newest_name);
+                        return parse_crash_info(&newest_path, Vec::new());
+                    }
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 

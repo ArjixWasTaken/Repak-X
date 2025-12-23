@@ -433,6 +433,146 @@ pub fn is_iostore_compressed<P: AsRef<Path>>(utoc_path: P) -> Result<bool> {
     Ok(false) // No compressed blocks found
 }
 
+/// Extract ScriptObjects chunk from an IoStore container
+/// This is needed for proper IoStore -> Legacy conversion
+/// 
+/// # Arguments
+/// * `paks_path` - Path to the Paks folder containing .utoc files
+/// * `config` - Configuration with AES keys if needed
+/// 
+/// # Returns
+/// The raw ScriptObjects data as bytes, or error if not found
+pub fn extract_script_objects<P: AsRef<Path>>(
+    paks_path: P,
+    config: Arc<Config>,
+) -> Result<Vec<u8>> {
+    let paks_dir = paks_path.as_ref();
+    
+    // Find .utoc files
+    let mut utoc_files: Vec<_> = fs::read_dir(paks_dir)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().map_or(false, |ext| ext == "utoc"))
+        .collect();
+    
+    if utoc_files.is_empty() {
+        bail!("No .utoc files found in Paks folder");
+    }
+    
+    // Sort to try pakchunk0 first (most likely to have ScriptObjects)
+    utoc_files.sort_by(|a, b| {
+        let a_name = a.file_name().to_string_lossy().to_lowercase();
+        let b_name = b.file_name().to_string_lossy().to_lowercase();
+        let a_priority = if a_name.contains("pakchunk0") { 0 } else if a_name.contains("global") { 1 } else { 2 };
+        let b_priority = if b_name.contains("pakchunk0") { 0 } else if b_name.contains("global") { 1 } else { 2 };
+        a_priority.cmp(&b_priority)
+    });
+    
+    // ScriptObjects chunk ID: type 5, id 0, index 0
+    let script_objects_chunk_id = FIoChunkId::create(0, 0, EIoChunkType::ScriptObjects);
+
+    // Scan all .utoc files and pick the most complete ScriptObjects table.
+    // Some games may have ScriptObjects in pakchunk0 (or elsewhere) and global can be partial.
+    println!(
+        "[retoc] extract_script_objects: scanning {} .utoc files in {}",
+        utoc_files.len(),
+        paks_dir.display()
+    );
+    let mut best: Option<(PathBuf, Vec<u8>, usize, usize)> = None;
+    for utoc_entry in utoc_files {
+        let utoc_path = utoc_entry.path();
+
+        let iostore = match iostore::open(&utoc_path, config.clone()) {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+
+        if !iostore.has_chunk_id(script_objects_chunk_id) {
+            continue;
+        }
+
+        let data = match iostore.read(script_objects_chunk_id) {
+            Ok(d) => d,
+            Err(_) => continue,
+        };
+
+        let info = match inspect_script_objects_bytes(&data) {
+            Ok(i) => i,
+            Err(_) => continue,
+        };
+
+        println!(
+            "[retoc] ScriptObjects candidate: {} | bytes={} | global_names={} | script_objects={} ",
+            utoc_path.display(),
+            data.len(),
+            info.global_name_count,
+            info.script_object_count
+        );
+
+        let replace_best = match best.as_ref() {
+            None => true,
+            Some((_best_path, best_data, best_global_name_count, best_script_object_count)) => {
+                info.script_object_count > *best_script_object_count
+                    || (info.script_object_count == *best_script_object_count
+                        && info.global_name_count > *best_global_name_count)
+                    || (info.script_object_count == *best_script_object_count
+                        && info.global_name_count == *best_global_name_count
+                        && data.len() > best_data.len())
+            }
+        };
+
+        if replace_best {
+            best = Some((utoc_path, data, info.global_name_count, info.script_object_count));
+        }
+    }
+
+    if let Some((_utoc_path, data, _global_name_count, _script_object_count)) = best {
+        println!(
+            "[retoc] extract_script_objects: selected ScriptObjects from {} (bytes={}, global_names={}, script_objects={})",
+            _utoc_path.display(),
+            data.len(),
+            _global_name_count,
+            _script_object_count
+        );
+        return Ok(data);
+    }
+
+    bail!("ScriptObjects chunk not found (or not parseable) in any IoStore container")
+}
+
+ #[derive(Debug, Clone)]
+ pub struct ScriptObjectsInfo {
+     pub global_name_count: usize,
+     pub script_object_count: usize,
+     pub matching_names: Vec<String>,
+ }
+
+ pub fn inspect_script_objects_bytes(data: &[u8]) -> Result<ScriptObjectsInfo> {
+     let mut cursor = Cursor::new(data);
+     let script_objects = script_objects::ZenScriptObjects::deserialize_new(&mut cursor)?;
+ 
+     let names = script_objects.global_name_map.copy_raw_names();
+     let matching_names: Vec<String> = names
+         .iter()
+         .filter(|n| {
+             let lower = n.to_ascii_lowercase();
+             lower.contains("texture")
+                 || lower.contains("material")
+                 || lower.contains("staticmesh")
+                 || lower.contains("skeletalmesh")
+                 || lower.contains("blueprint")
+                 || lower.contains("anim")
+         })
+         .take(50)
+         .cloned()
+         .collect();
+ 
+     Ok(ScriptObjectsInfo {
+         global_name_count: names.len(),
+         script_object_count: script_objects.script_objects.len(),
+         matching_names,
+     })
+ }
+
 /// Extract assets from an IoStore container to a directory.
 /// This converts IoStore packages back to legacy .uasset/.uexp/.ubulk files.
 /// 
@@ -454,27 +594,76 @@ pub fn extract_iostore<P: AsRef<Path>, Q: AsRef<Path>>(
     // Create output directory
     fs::create_dir_all(output)?;
     
-    // Open the IoStore
-    let iostore = iostore::open(utoc_path, config.clone())?;
+    // Open IoStore.
+    // If a single .utoc file is provided, prefer using the directory backend so imports can be
+    // resolved from other bundles in the same folder (base game + mods).
+    let preferred_container_name = utoc_path
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string());
+
+    // Helper: walk up the path to find a ~mods folder and return its parent (base bundles dir)
+    fn find_base_bundles_dir(path: &Path) -> Option<PathBuf> {
+        let mut current = path.parent();
+        while let Some(dir) = current {
+            if let Some(name) = dir.file_name() {
+                if name.to_string_lossy().to_ascii_lowercase() == "~mods" {
+                    return dir.parent().map(|p| p.to_path_buf());
+                }
+            }
+            current = dir.parent();
+        }
+        None
+    }
+
+    let (iostore, filter_container_name): (Box<dyn IoStoreTrait>, Option<String>) = if utoc_path.is_dir() {
+        eprintln!("[extract_iostore] Input is directory, opening directly: {:?}", utoc_path);
+        (iostore::open(utoc_path, config.clone())?, None)
+    } else if let Some(preferred) = preferred_container_name.clone() {
+        // Check if the utoc is anywhere under a ~mods folder
+        if let Some(base_bundles_dir) = find_base_bundles_dir(utoc_path) {
+            eprintln!("[extract_iostore] utoc_path={:?}", utoc_path);
+            eprintln!("[extract_iostore] Detected ~mods in ancestry. Opening base_bundles_dir={:?} with mod container injected", base_bundles_dir);
+            (
+                iostore::open_with_additional_container(&base_bundles_dir, utoc_path, config.clone())?,
+                Some(preferred),
+            )
+        } else if let Some(parent) = utoc_path.parent() {
+            eprintln!("[extract_iostore] utoc_path={:?}, no ~mods in ancestry, opening parent={:?}", utoc_path, parent);
+            (
+                iostore::open_with_preferred_container(parent, &preferred, config.clone())?,
+                Some(preferred),
+            )
+        } else {
+            eprintln!("[extract_iostore] No parent for utoc_path, opening directly");
+            (iostore::open(utoc_path, config.clone())?, Some(preferred))
+        }
+    } else {
+        eprintln!("[extract_iostore] No preferred_container_name, opening utoc directly");
+        (iostore::open(utoc_path, config.clone())?, None)
+    };
     
-    // Create a file writer for the output directory
-    let file_writer = FSFileWriter::new(output);
-    let log = Log::new(false, false);
+    eprintln!("[extract_iostore] filter_container_name={:?}", filter_container_name);
     
-    // Get all packages to extract
-    let mut packages_to_extract = vec![];
-    for package_info in iostore.packages() {
-        let chunk_id = FIoChunkId::from_package_id(package_info.id(), 0, EIoChunkType::ExportBundleData);
-        if let Some(package_path) = iostore.chunk_path(chunk_id) {
-            packages_to_extract.push((package_info, package_path));
+    // Get container header version for parsing package names
+    let container_header_version = iostore.container_header_version()
+        .unwrap_or(container_header::EIoContainerHeaderVersion::NoExportInfo);
+    
+    // Collect all ExportBundleData chunks (these contain the actual package data)
+    let mut export_chunks = vec![];
+    for chunk_info in iostore.chunks_all() {
+        let chunk_id = chunk_info.id();
+        if chunk_id.get_chunk_type() == EIoChunkType::ExportBundleData {
+            if let Some(ref name) = filter_container_name {
+                if chunk_info.container().container_name() != name {
+                    continue;
+                }
+            }
+            export_chunks.push(chunk_info);
         }
     }
     
-    let package_count = packages_to_extract.len();
-    
-    // If no packages found, fall back to directory index extraction
-    if package_count == 0 {
-        // Fall back to raw file extraction from directory index
+    // If no export chunks found, fall back to directory index extraction (raw files)
+    if export_chunks.is_empty() {
         let mut stream = BufReader::new(fs::File::open(utoc_path)?);
         let ucas = utoc_path.with_extension("ucas");
         let toc: Toc = stream.de_ctx(config)?;
@@ -496,30 +685,98 @@ pub fn extract_iostore<P: AsRef<Path>, Q: AsRef<Path>>(
         
         return Ok(file_count);
     }
-    
-    // Convert packages to legacy format
+
+    let log = Log::new(false, false);
     let package_context = asset_conversion::FZenPackageContext::create(&*iostore, None, &log);
-    
-    for (package_info, package_path) in &packages_to_extract {
-        // Strip the mount point prefix (../../../)
-        let path = package_path
-            .strip_prefix("../../../")
-            .unwrap_or(package_path);
-        
-        let out_path = UEPath::new(path);
-        
-        if let Err(e) = asset_conversion::build_legacy(
-            &package_context,
-            package_info.id(),
-            &out_path,
-            &file_writer,
-        ) {
-            // Log error but continue with other packages
-            eprintln!("Failed to extract {}: {}", package_path, e);
+    let file_writer = FSFileWriter::new(output);
+
+    let mut converted_packages = 0usize;
+    let mut raw_failed_packages: std::collections::HashMap<u64, String> = std::collections::HashMap::new();
+
+    for chunk_info in &export_chunks {
+        let chunk_id = chunk_info.id();
+        let package_id = chunk_id.get_package_id();
+
+        let (rel_path, package_name) = if let Some(path) = iostore.chunk_path(chunk_id) {
+            let rel_path = path.strip_prefix("../../../").unwrap_or(&path).to_string();
+            let package_name = rel_path
+                .strip_suffix(".uasset")
+                .unwrap_or(rel_path.as_str())
+                .to_string();
+            (rel_path, package_name)
+        } else {
+            let data = chunk_info.read()?;
+            let name = zen::get_package_name(&data, container_header_version)
+                .unwrap_or_else(|_| format!("chunk_{:016x}", chunk_id.get_chunk_id()));
+            let trimmed = name.trim_start_matches('/');
+            let rel_path = format!("{}.uasset", trimmed);
+            (rel_path.clone(), trimmed.to_string())
+        };
+
+        let out_path = UEPath::new(&rel_path);
+        match asset_conversion::build_legacy(&package_context, package_id, out_path, &file_writer) {
+            Ok(_) => {
+                converted_packages += 1;
+            }
+            Err(err) => {
+                eprintln!("Warning: Failed legacy conversion for {}: {:#}", rel_path, err);
+
+                // Fallback: write raw zen package payload with .uasset extension
+                let data = chunk_info.read()?;
+                let out_path = output.join(format!("{}.uasset", package_name));
+                if let Some(parent) = out_path.parent() {
+                    fs::create_dir_all(parent)?;
+                }
+                fs::write(&out_path, &data)?;
+                raw_failed_packages.insert(package_id.0, package_name);
+            }
         }
     }
-    
-    Ok(package_count)
+
+    // Extract bulk data chunks for any packages that fell back to raw extraction.
+    if !raw_failed_packages.is_empty() {
+        for chunk_info in iostore.chunks_all() {
+            if let Some(ref name) = filter_container_name {
+                if chunk_info.container().container_name() != name {
+                    continue;
+                }
+            }
+
+            let chunk_id = chunk_info.id();
+            let chunk_type = chunk_id.get_chunk_type();
+            if !matches!(
+                chunk_type,
+                EIoChunkType::BulkData | EIoChunkType::OptionalBulkData | EIoChunkType::MemoryMappedBulkData
+            ) {
+                continue;
+            }
+
+            let bulk_package_id = chunk_id.get_chunk_id();
+            let Some(package_name) = raw_failed_packages.get(&bulk_package_id) else {
+                continue;
+            };
+
+            let data = match chunk_info.read() {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+
+            let ext = match chunk_type {
+                EIoChunkType::BulkData => "ubulk",
+                EIoChunkType::OptionalBulkData => "uptnl",
+                EIoChunkType::MemoryMappedBulkData => "m.ubulk",
+                _ => "bin",
+            };
+
+            let out_path = output.join(format!("{}.{}", package_name, ext));
+            if let Some(parent) = out_path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::write(&out_path, &data)?;
+        }
+    }
+
+    Ok(converted_packages + raw_failed_packages.len())
 }
 
 /// Recompress an IoStore container by reading all chunks and writing them back with Oodle compression.
@@ -1471,6 +1728,18 @@ fn read_file_opt<P: AsRef<Path>>(path: P) -> Result<Option<Vec<u8>>> {
 pub struct Config {
     pub aes_keys: HashMap<FGuid, AesKey>,
     pub container_header_version_override: Option<EIoContainerHeaderVersion>,
+    pub script_objects_override: Option<Vec<u8>>,
+}
+
+impl Config {
+    /// Create a Config with a default AES key (for Marvel Rivals)
+    pub fn default_with_aes(aes_hex: &str) -> Self {
+        let mut config = Config::default();
+        if let Ok(key) = AesKey::from_str(aes_hex) {
+            config.aes_keys.insert(FGuid::default(), key);
+        }
+        config
+    }
 }
 
 #[derive(Debug, Clone)]

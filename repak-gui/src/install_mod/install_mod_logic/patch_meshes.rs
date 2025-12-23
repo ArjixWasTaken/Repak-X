@@ -18,6 +18,7 @@ impl Logger for PrintLogger {
 }
 
 /// Simple mesh patch wrapper - calls mesh_patch_with_source with no source directory
+#[allow(dead_code)]
 pub fn mesh_patch(paths: &mut Vec<PathBuf>, mod_dir: &PathBuf) -> Result<(), repak::Error> {
     mesh_patch_with_source(paths, mod_dir, None)
 }

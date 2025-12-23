@@ -1,6 +1,6 @@
 use anyhow::Result;
 use std::io::{self, BufRead};
-use uasset_toolkit::{UAssetToolkit, UAssetToolkitSync};
+use uasset_toolkit::UAssetToolkit;
 
 #[tokio::main]
 async fn main() -> Result<()> {

@@ -61,6 +61,9 @@ impl<'a> FZenPackageContext<'a> {
                 return Ok(self.script_objects.read().unwrap());
             }
 
+            // ScriptObjects are required for correct legacy conversion.
+            // For mod containers that don't include ScriptObjects, provide them via Config override
+            // (IoStoreTrait::load_script_objects will handle override when configured).
             let script_objects = self.store_access.load_script_objects()?;
             let mut script_objects_resolved_as_classes = HashSet::new();
 
@@ -139,11 +142,8 @@ impl<'a> FZenPackageContext<'a> {
             write_lock.packages_failed_load.insert(package_id);
             return Err(read_error)
         }
-        if package_store_entry_ref.is_none() {
-            let mut write_lock = self.inner_state.write().unwrap();
-            write_lock.packages_failed_load.insert(package_id);
-            return Err(anyhow!("Failed to find Package Store Entry for Package Id {}", package_id));
-        }
+        // Note: package_store_entry can be None for UE5 packages - they can still be deserialized
+        // Only UE 4.27 and below require store entries for parsing
 
         let mut zen_package_buffer = Cursor::new(package_data?);
         let container_version = self.store_access.container_file_version().ok_or_else(|| { anyhow!("Failed to retrieve container TOC version") })?;
