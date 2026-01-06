@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import './Tooltip.css';
 
 /**
- * HeroUI-style Tooltip component
+ * repakx-style Tooltip component
  * 
  * @param {Object} props
  * @param {React.ReactNode} props.children - The trigger element
@@ -86,7 +86,7 @@ const Tooltip = ({
 
   return (
     <div 
-      className="heroui-tooltip-trigger"
+      className="repakx-tooltip-trigger"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       onFocus={handleMouseEnter}
@@ -96,7 +96,7 @@ const Tooltip = ({
       <AnimatePresence>
         {isVisible && content && (
           <motion.div
-            className={`heroui-tooltip-content ${color} ${size} radius-${radius} ${className}`}
+            className={`repakx-tooltip-content ${color} ${size} radius-${radius} ${className}`}
             data-placement={placement}
             style={{ 
               '--tooltip-offset': `${offset}px`,
@@ -109,7 +109,7 @@ const Tooltip = ({
             transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
             {...props}
           >
-            {showArrow && <div className="heroui-tooltip-arrow" />}
+            {showArrow && <div className="repakx-tooltip-arrow" />}
             {content}
           </motion.div>
         )}

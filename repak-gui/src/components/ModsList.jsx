@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, memo } from 'react'
 import { motion } from 'framer-motion'
 import { Tooltip } from '@mui/material'
 import { RiDeleteBin2Fill } from 'react-icons/ri'
@@ -6,12 +6,12 @@ import { FaTag } from "react-icons/fa6"
 import Checkbox from './ui/Checkbox'
 import Switch from './ui/Switch'
 import NumberInput from './ui/NumberInput'
+import { toTagArray } from '../utils/tags'
+import { formatFileSize } from '../utils/format'
 import './ModsList.css'
 import './ModDetailsPanel.css'
 
 const heroImages = import.meta.glob('../assets/hero/*.png', { eager: true })
-
-const toTagArray = (tags) => Array.isArray(tags) ? tags : (tags ? [tags] : [])
 
 // Get hero image by character name
 function getHeroImage(heroName, characterData) {
@@ -58,8 +58,8 @@ function getHeroImage(heroName, characterData) {
     return fallbackImage
 }
 
-// Mod Item Component
-function ModItem({
+// Mod Item Component - Memoized for virtualization performance
+const ModItem = memo(function ModItem({
     mod,
     selectedMod,
     selectedMods,
@@ -69,7 +69,6 @@ function ModItem({
     handleSetPriority,
     handleDeleteMod,
     handleRemoveTag,
-    formatFileSize,
     hideSuffix,
     onContextMenu,
     showHeroIcons,
@@ -366,11 +365,11 @@ function ModItem({
             </div>
         </div>
     )
-}
+})
 
 /**
  * ModsList Component
- * Renders the grid/list of mods state, utilizing virtualized rendering if needed (currently explicit)
+ * Renders the grid/list of mods with virtualized rendering for list view
  */
 export default function ModsList({
     mods,
@@ -384,7 +383,6 @@ export default function ModsList({
     onRemoveTag,
     onSetPriority,
     onContextMenu,
-    formatFileSize,
     hideSuffix,
     showHeroIcons,
     showHeroBg,
@@ -400,51 +398,52 @@ export default function ModsList({
     onDeleteBlocked
 }) {
     return (
-        <div
-            key={viewMode}
-            ref={gridRef}
-            className={`mod-list-grid view-${viewMode} ${mods.length === 0 ? 'empty' : ''}`}
-            style={{ overflowY: 'auto', padding: '1rem' }}
-        >
-            {mods.length === 0 ? (
-                <div className="empty-state">
-                    <p>No mods found in this folder.</p>
-                </div>
-            ) : (
-                mods.map(mod => {
-                    const details = modDetails?.[mod.path]
-                    return (
-                        <ModItem
-                            key={mod.path}
-                            mod={mod}
-                            selectedMod={selectedMod}
-                            selectedMods={selectedMods}
-                            onSelect={onSelect}
-                            handleToggleModSelection={onToggleSelection}
-                            handleToggleMod={onToggleMod}
-                            handleDeleteMod={onDeleteMod}
-                            handleRemoveTag={onRemoveTag}
-                            handleSetPriority={onSetPriority}
-                            onContextMenu={onContextMenu}
-                            formatFileSize={formatFileSize}
-                            hideSuffix={hideSuffix}
-                            showHeroIcons={showHeroIcons}
-                            showHeroBg={showHeroBg}
-                            showModType={showModType}
-                            characterName={details?.character_name}
-                            category={details?.category}
-                            viewMode={viewMode}
-                            characterData={characterData}
-                            onRename={onRename}
-                            shouldStartRenaming={renamingModPath === mod.path}
-                            onClearRenaming={onClearRenaming}
-                            gameRunning={gameRunning}
-                            onRenameBlocked={onRenameBlocked}
-                            onDeleteBlocked={onDeleteBlocked}
-                        />
-                    )
-                })
-            )}
+        <div className="mods-list-wrapper">
+            <div
+                key={viewMode}
+                ref={gridRef}
+                className={`mod-list-grid view-${viewMode} ${mods.length === 0 ? 'empty' : ''}`}
+                style={{ overflowY: 'auto', height: '100%' }}
+            >
+                {mods.length === 0 ? (
+                    <div className="empty-state">
+                        <p>No mods found in this folder.</p>
+                    </div>
+                ) : (
+                    mods.map(mod => {
+                        const details = modDetails?.[mod.path]
+                        return (
+                            <ModItem
+                                key={mod.path}
+                                mod={mod}
+                                selectedMod={selectedMod}
+                                selectedMods={selectedMods}
+                                onSelect={onSelect}
+                                handleToggleModSelection={onToggleSelection}
+                                handleToggleMod={onToggleMod}
+                                handleDeleteMod={onDeleteMod}
+                                handleRemoveTag={onRemoveTag}
+                                handleSetPriority={onSetPriority}
+                                onContextMenu={onContextMenu}
+                                hideSuffix={hideSuffix}
+                                showHeroIcons={showHeroIcons}
+                                showHeroBg={showHeroBg}
+                                showModType={showModType}
+                                characterName={details?.character_name}
+                                category={details?.category}
+                                viewMode={viewMode}
+                                characterData={characterData}
+                                onRename={onRename}
+                                shouldStartRenaming={renamingModPath === mod.path}
+                                onClearRenaming={onClearRenaming}
+                                gameRunning={gameRunning}
+                                onRenameBlocked={onRenameBlocked}
+                                onDeleteBlocked={onDeleteBlocked}
+                            />
+                        )
+                    })
+                )}
+            </div>
         </div>
     )
 }

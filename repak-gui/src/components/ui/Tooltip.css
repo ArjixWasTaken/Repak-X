@@ -1,11 +1,11 @@
-/* HeroUI Tooltip Styles */
-.heroui-tooltip-trigger {
+/* RepakX Tooltip Styles */
+.repakx-tooltip-trigger {
   display: inline-flex;
   position: relative;
   box-sizing: border-box;
 }
 
-.heroui-tooltip-content {
+.repakx-tooltip-content {
   position: absolute;
   z-index: 1000;
   padding: 0.5rem 0.75rem;
@@ -21,28 +21,28 @@
 }
 
 /* Placements */
-.heroui-tooltip-content[data-placement="top"] {
+.repakx-tooltip-content[data-placement="top"] {
   bottom: 100%;
   left: 50%;
   transform: translateX(-50%);
   margin-bottom: var(--tooltip-offset, 7px);
 }
 
-.heroui-tooltip-content[data-placement="bottom"] {
+.repakx-tooltip-content[data-placement="bottom"] {
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
   margin-top: var(--tooltip-offset, 7px);
 }
 
-.heroui-tooltip-content[data-placement="left"] {
+.repakx-tooltip-content[data-placement="left"] {
   right: 100%;
   top: 50%;
   transform: translateY(-50%);
   margin-right: var(--tooltip-offset, 7px);
 }
 
-.heroui-tooltip-content[data-placement="right"] {
+.repakx-tooltip-content[data-placement="right"] {
   left: 100%;
   top: 50%;
   transform: translateY(-50%);
@@ -50,66 +50,66 @@
 }
 
 /* Colors */
-.heroui-tooltip-content.default {
+.repakx-tooltip-content.default {
   background-color: #ffffff;
   color: #000000;
 }
-[data-theme="dark"] .heroui-tooltip-content.default {
+[data-theme="dark"] .repakx-tooltip-content.default {
   background-color: #27272a;
   color: #ffffff;
   border: 1px solid #3f3f46;
 }
 
-.heroui-tooltip-content.primary {
+.repakx-tooltip-content.primary {
   background-color: #006fee;
   color: #ffffff;
 }
 
-.heroui-tooltip-content.secondary {
+.repakx-tooltip-content.secondary {
   background-color: #7828c8;
   color: #ffffff;
 }
 
-.heroui-tooltip-content.success {
+.repakx-tooltip-content.success {
   background-color: #17c964;
   color: #000000;
 }
 
-.heroui-tooltip-content.warning {
+.repakx-tooltip-content.warning {
   background-color: #f5a524;
   color: #000000;
 }
 
-.heroui-tooltip-content.danger {
+.repakx-tooltip-content.danger {
   background-color: #f31260;
   color: #ffffff;
 }
 
 /* Sizes */
-.heroui-tooltip-content.sm {
+.repakx-tooltip-content.sm {
   padding: 0.25rem 0.5rem;
   font-size: 0.75rem;
 }
 
-.heroui-tooltip-content.md {
+.repakx-tooltip-content.md {
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
 }
 
-.heroui-tooltip-content.lg {
+.repakx-tooltip-content.lg {
   padding: 0.75rem 1rem;
   font-size: 1rem;
 }
 
 /* Radius */
-.heroui-tooltip-content.radius-none { border-radius: 0; }
-.heroui-tooltip-content.radius-sm { border-radius: 0.25rem; }
-.heroui-tooltip-content.radius-md { border-radius: 0.5rem; }
-.heroui-tooltip-content.radius-lg { border-radius: 0.75rem; }
-.heroui-tooltip-content.radius-full { border-radius: 9999px; }
+.repakx-tooltip-content.radius-none { border-radius: 0; }
+.repakx-tooltip-content.radius-sm { border-radius: 0.25rem; }
+.repakx-tooltip-content.radius-md { border-radius: 0.5rem; }
+.repakx-tooltip-content.radius-lg { border-radius: 0.75rem; }
+.repakx-tooltip-content.radius-full { border-radius: 9999px; }
 
 /* Arrow */
-.heroui-tooltip-arrow {
+.repakx-tooltip-arrow {
   position: absolute;
   width: 8px;
   height: 8px;
@@ -118,25 +118,25 @@
   z-index: -1;
 }
 
-[data-placement="top"] .heroui-tooltip-arrow {
+[data-placement="top"] .repakx-tooltip-arrow {
   bottom: -4px;
   left: 50%;
   margin-left: -4px;
 }
 
-[data-placement="bottom"] .heroui-tooltip-arrow {
+[data-placement="bottom"] .repakx-tooltip-arrow {
   top: -4px;
   left: 50%;
   margin-left: -4px;
 }
 
-[data-placement="left"] .heroui-tooltip-arrow {
+[data-placement="left"] .repakx-tooltip-arrow {
   right: -4px;
   top: 50%;
   margin-top: -4px;
 }
 
-[data-placement="right"] .heroui-tooltip-arrow {
+[data-placement="right"] .repakx-tooltip-arrow {
   left: -4px;
   top: 50%;
   margin-top: -4px;
