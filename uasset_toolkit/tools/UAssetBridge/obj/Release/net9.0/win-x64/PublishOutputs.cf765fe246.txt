@@ -1,5 +1,0 @@
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\debug\uassetbridge\UAssetBridge.exe
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\debug\uassetbridge\UAssetBridge.dll
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\debug\uassetbridge\UAssetBridge.deps.json
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\debug\uassetbridge\UAssetBridge.runtimeconfig.json
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\target\debug\uassetbridge\UAssetBridge.pdb

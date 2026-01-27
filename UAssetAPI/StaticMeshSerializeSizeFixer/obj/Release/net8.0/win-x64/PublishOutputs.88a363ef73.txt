@@ -1,3 +1,0 @@
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\StaticMeshSerializeSizeFixer\bin\Release\net8.0\win-x64\publish\StaticMeshSerializeSizeFixer.pdb
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\StaticMeshSerializeSizeFixer\bin\Release\net8.0\win-x64\publish\UAssetAPI.pdb
-E:\WindsurfCoding\repak_rivals-remastered\UAssetAPI\StaticMeshSerializeSizeFixer\bin\Release\net8.0\win-x64\publish\StaticMeshSerializeSizeFixer.exe

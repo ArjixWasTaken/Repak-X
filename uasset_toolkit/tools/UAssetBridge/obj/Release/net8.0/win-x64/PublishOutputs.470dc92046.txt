@@ -1,3 +1,0 @@
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped-TauriUpdate\target\debug\uassetbridge\UAssetBridge.pdb
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped-TauriUpdate\target\debug\uassetbridge\UAssetAPI.pdb
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped-TauriUpdate\target\debug\uassetbridge\UAssetBridge.exe

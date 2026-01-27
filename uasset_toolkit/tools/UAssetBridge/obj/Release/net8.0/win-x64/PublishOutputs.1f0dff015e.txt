@@ -1,3 +1,0 @@
-E:\WindsurfCoding\repakTauri\Repak_Gui-Revamped\target\release\uassetbridge\UAssetBridge.pdb
-E:\WindsurfCoding\repakTauri\Repak_Gui-Revamped\target\release\uassetbridge\UAssetAPI.pdb
-E:\WindsurfCoding\repakTauri\Repak_Gui-Revamped\target\release\uassetbridge\UAssetBridge.exe

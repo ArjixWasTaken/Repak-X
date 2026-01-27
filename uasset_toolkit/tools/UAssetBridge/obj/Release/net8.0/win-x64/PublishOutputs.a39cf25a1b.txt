@@ -1,3 +1,0 @@
-C:\WindsurfCoding\Repak-Gui-Revamped\Repak-Gui-Revamped\dist\dotnet-temp\UAssetBridge\UAssetBridge.pdb
-C:\WindsurfCoding\Repak-Gui-Revamped\Repak-Gui-Revamped\dist\dotnet-temp\UAssetBridge\UAssetAPI.pdb
-C:\WindsurfCoding\Repak-Gui-Revamped\Repak-Gui-Revamped\dist\dotnet-temp\UAssetBridge\UAssetBridge.exe

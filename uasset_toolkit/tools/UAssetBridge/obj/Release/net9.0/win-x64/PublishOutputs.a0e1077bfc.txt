@@ -1,5 +1,0 @@
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\publish\UAssetBridge.exe
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\publish\UAssetBridge.dll
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\publish\UAssetBridge.deps.json
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\publish\UAssetBridge.runtimeconfig.json
-E:\WindsurfCoding\repak_rivals-remastered\Repak_Gui-Revamped\uasset_toolkit\tools\UAssetBridge\bin\Release\net9.0\win-x64\publish\UAssetBridge.pdb
