@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import './ContextMenu.css'
 
-const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCreateFolder, folders, onDelete, onToggle, onRename, allTags, gamePath }) => {
+const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCreateFolder, folders, onDelete, onToggle, onRename, onCheckConflicts, allTags, gamePath }) => {
   const [isDeleting, setIsDeleting] = useState(false)
   const deleteTimeoutRef = useRef(null)
   const menuRef = useRef(null)
@@ -171,6 +171,12 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
             Root
           </div>
         </div>
+      </div>
+
+      <div className="context-menu-separator" />
+
+      <div className="context-menu-item" onClick={() => { if (onCheckConflicts) onCheckConflicts(); onClose(); }}>
+        ⚠️ Check Conflicts
       </div>
 
       <div className="context-menu-separator" />

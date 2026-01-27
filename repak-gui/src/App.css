@@ -198,8 +198,7 @@ body {
   font-weight: normal;
 }
 
-/* Check Conflicts Button */
-.btn-check-conflicts {}
+
 
 /* Mod Details Layout */
 .mod-details-and-contents {
@@ -1732,7 +1731,7 @@ input[type="text"]:focus {
   border-radius: 12px;
   display: flex;
   align-items: center;
-  padding: 0 1rem;
+  padding: 0.5rem;
   transition: border-color 0.2s, box-shadow 0.2s;
 }
 
@@ -1752,13 +1751,15 @@ input[type="text"]:focus {
   border: none;
   font-size: 1.1rem;
   color: var(--text-primary);
+  caret-color: var(--accent-primary);
   width: 100%;
   height: 100%;
   outline: none;
 }
 
 .main-search-input::placeholder {
-  color: rgba(255, 255, 255, 0.3);
+  color: var(--text-secondary);
+  opacity: 0.8;
 }
 
 .btn-icon-clear {
@@ -1778,26 +1779,27 @@ input[type="text"]:focus {
   color: var(--text-primary);
 }
 
+/* MUI Clear Search Button - Theme-aware styling */
+.clear-search-btn {
+  color: var(--text-secondary) !important;
+  transition: all 0.2s !important;
+}
+
+.clear-search-btn:hover {
+  color: var(--text-primary) !important;
+  background-color: color-mix(in srgb, var(--text-secondary), transparent 90%) !important;
+}
+
+.clear-search-btn svg {
+  color: inherit !important;
+}
+
 .action-controls {
   display: flex;
   gap: 1rem;
 }
 
-.filter-select-large {
-  background: var(--bg-darker);
-  border: 1px solid var(--panel-border);
-  border-radius: 12px;
-  padding: 0 1.5rem;
-  color: var(--text-primary);
-  font-size: 1rem;
-  cursor: pointer;
-  outline: none;
-  min-width: 160px;
-}
 
-.filter-select-large:focus {
-  border-color: var(--accent-primary);
-}
 
 .btn-install-large {
   background: var(--accent-gradient);

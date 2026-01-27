@@ -69,6 +69,7 @@ const Switch = ({
         aria-disabled={isDisabled || isLoading}
         onClick={handleToggle}
         disabled={isDisabled || isLoading}
+        title={currentChecked ? 'Disable' : 'Enable'}
         {...props}
       >
         <span className="repakx-switch-track">

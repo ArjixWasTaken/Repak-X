@@ -22,7 +22,7 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      font-family: 'Segoe UI', system-ui, sans-serif;
       background-color: #141414;
       color: #e6e6e6;
     }
@@ -37,7 +37,7 @@
       align-items: center;
       justify-content: center;
       background: linear-gradient(135deg, #141414 0%, #1a1a1a 50%, #1f1f1f 100%);
-      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-family: 'Segoe UI', system-ui, sans-serif;
       color: #fff;
       overflow: hidden;
       z-index: 9999;
@@ -123,7 +123,6 @@
 
     .splash-card {
       background: rgba(255, 255, 255, 0.03);
-      backdrop-filter: blur(10px);
       border: 1px solid rgba(255, 255, 255, 0.08);
       border-radius: 24px;
       padding: 2.5rem;
@@ -159,14 +158,14 @@
           <div class="status-detail">Preparing your environment...</div>
         </div>
         <div class="splash-progress-container">
-          <div class="splash-progress-bar" style="animation: initProgress 3s"></div>
+          <div class="splash-progress-bar" style="animation: initProgress 2s linear"></div>
         </div>
       </div>
     </div>
   </div>
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
-  <script src="http://localhost:8097"></script> <!-- React DevTools -->
+  <!-- <script src="http://localhost:8097"></script>  React DevTools -->
 </body>
 
 </html>

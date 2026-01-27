@@ -8,6 +8,7 @@ import Switch from './ui/Switch'
 import NumberInput from './ui/NumberInput'
 import { toTagArray } from '../utils/tags'
 import { formatFileSize } from '../utils/format'
+import { detectHeroesWithData } from '../utils/heroes'
 import './ModsList.css'
 import './ModDetailsPanel.css'
 
@@ -83,7 +84,8 @@ const ModItem = memo(function ModItem({
     onClearRenaming,
     gameRunning,
     onRenameBlocked,
-    onDeleteBlocked
+    onDeleteBlocked,
+    modDetails
 }) {
     const [isDeleteHolding, setIsDeleteHolding] = useState(false)
     const [isRenaming, setIsRenaming] = useState(false)
@@ -193,6 +195,15 @@ const ModItem = memo(function ModItem({
     const heroImage = (showHeroIcons || showHeroBg) ? getHeroImage(characterName, characterData) : null
     const isCardView = viewMode === 'grid' || viewMode === 'compact'
 
+    // Detect heroes for multi-hero mods - check both characterName and mod_type
+    const isMultiHero = (
+        (characterName && characterName.toLowerCase().includes('multiple')) ||
+        (modDetails?.mod_type && typeof modDetails.mod_type === 'string' && modDetails.mod_type.startsWith('Multiple Heroes'))
+    )
+    const heroesList = isMultiHero && modDetails?.files && Array.isArray(modDetails.files)
+        ? detectHeroesWithData(modDetails.files, characterData)
+        : []
+
     return (
         <div
             className={`mod-card ${selectedMods.has(mod.path) ? 'selected' : ''} ${selectedMod?.path === mod.path ? 'viewing' : ''} ${heroImage && showHeroBg ? 'has-hero-bg' : ''}`}
@@ -220,8 +231,42 @@ const ModItem = memo(function ModItem({
                     />
                 </div>
                 {/* Hero icon before name in list view */}
-                {heroImage && showHeroIcons && viewMode === 'list' && (
-                    <img src={heroImage} alt="" className="mod-hero-icon-inline" />
+                {heroImage && showHeroIcons && (viewMode === 'list' || viewMode === 'list-compact') && (
+                    isMultiHero && heroesList.length > 0 ? (
+                        <Tooltip
+                            title={
+                                <div className="heroes-list">
+                                    {heroesList.map(name => (
+                                        <span key={name} className="tag hero-tag">
+                                            {getHeroImage(name, characterData) && (
+                                                <img src={getHeroImage(name, characterData)} alt="" />
+                                            )}
+                                            {name}
+                                        </span>
+                                    ))}
+                                </div>
+                            }
+                            arrow
+                            placement="bottom"
+                            slotProps={{
+                                tooltip: {
+                                    className: 'multi-hero-tooltip'
+                                },
+                                arrow: {
+                                    className: 'multi-hero-arrow'
+                                }
+                            }}
+                        >
+                            <img src={heroImage} alt="" className="mod-hero-icon-inline" />
+                        </Tooltip>
+                    ) : (
+                        <img
+                            src={heroImage}
+                            alt=""
+                            className="mod-hero-icon-inline"
+                            title={characterName || 'Unknown Hero'}
+                        />
+                    )
                 )}
                 {isRenaming ? (
                     <div className="mod-rename-wrapper" onClick={(e) => e.stopPropagation()}>
@@ -262,9 +307,38 @@ const ModItem = memo(function ModItem({
             {((heroImage && showHeroIcons && isCardView) || (showModType && category) || tags.length > 0) ? (
                 <div className="mod-tags-row">
                     {heroImage && showHeroIcons && isCardView && (
-                        <Tooltip title={characterName || 'Unknown Hero'}>
-                            <img src={heroImage} alt="" className="mod-hero-icon-badge" />
-                        </Tooltip>
+                        isMultiHero && heroesList.length > 0 ? (
+                            <Tooltip
+                                title={
+                                    <div className="heroes-list">
+                                        {heroesList.map(name => (
+                                            <span key={name} className="tag hero-tag">
+                                                {getHeroImage(name, characterData) && (
+                                                    <img src={getHeroImage(name, characterData)} alt="" />
+                                                )}
+                                                {name}
+                                            </span>
+                                        ))}
+                                    </div>
+                                }
+                                arrow
+                                placement="bottom"
+                                slotProps={{
+                                    tooltip: {
+                                        className: 'multi-hero-tooltip'
+                                    },
+                                    arrow: {
+                                        className: 'multi-hero-arrow'
+                                    }
+                                }}
+                            >
+                                <img src={heroImage} alt="" className="mod-hero-icon-badge" />
+                            </Tooltip>
+                        ) : (
+                            <Tooltip title={characterName || 'Unknown Hero'}>
+                                <img src={heroImage} alt="" className="mod-hero-icon-badge" />
+                            </Tooltip>
+                        )
                     )}
                     {/* Type badge at start for card views */}
                     {showModType && category && isCardView && (
@@ -334,33 +408,30 @@ const ModItem = memo(function ModItem({
                         onChange={(newPriority) => handleSetPriority(mod.path, newPriority)}
                         disabled={gameRunning}
                     />
-                    <Tooltip title={mod.enabled ? 'Disable mod' : 'Enable mod'}>
-                        <div className="mod-switch-wrapper" onClick={(e) => e.stopPropagation()}>
-                            <Switch
-                                size="sm"
-                                color="primary"
-                                checked={mod.enabled}
-                                onChange={(_, event) => {
-                                    event?.stopPropagation()
-                                    handleToggleMod(mod.path)
-                                }}
-                                className="mod-switch"
-                            />
-                        </div>
-                    </Tooltip>
-                    <Tooltip title="Hold 2s to delete">
-                        <button
-                            className={`hold-delete ${isDeleteHolding ? 'holding' : ''}`}
-                            onMouseDown={startDeleteHold}
-                            onMouseUp={cancelDeleteHold}
-                            onMouseLeave={cancelDeleteHold}
-                            onTouchStart={startDeleteHold}
-                            onTouchEnd={cancelDeleteHold}
-                            aria-label="Hold to delete mod"
-                        >
-                            <RiDeleteBin2Fill size={18} />
-                        </button>
-                    </Tooltip>
+                    <div className="mod-switch-wrapper" onClick={(e) => e.stopPropagation()} >
+                        <Switch title={mod.enabled ? 'Disable mod' : 'Enable mod'}
+                            size="sm"
+                            color="primary"
+                            checked={mod.enabled}
+                            onChange={(_, event) => {
+                                event?.stopPropagation()
+                                handleToggleMod(mod.path)
+                            }}
+                            className="mod-switch"
+                        />
+                    </div>
+                    <button
+                        className={`hold-delete ${isDeleteHolding ? 'holding' : ''}`}
+                        onMouseDown={startDeleteHold}
+                        onMouseUp={cancelDeleteHold}
+                        onMouseLeave={cancelDeleteHold}
+                        onTouchStart={startDeleteHold}
+                        onTouchEnd={cancelDeleteHold}
+                        aria-label="Hold to delete mod"
+                        title="Hold 2s to delete"
+                    >
+                        <RiDeleteBin2Fill size={18} />
+                    </button>
                 </div>
             </div>
         </div>
@@ -439,6 +510,7 @@ export default function ModsList({
                                 gameRunning={gameRunning}
                                 onRenameBlocked={onRenameBlocked}
                                 onDeleteBlocked={onDeleteBlocked}
+                                modDetails={details}
                             />
                         )
                     })

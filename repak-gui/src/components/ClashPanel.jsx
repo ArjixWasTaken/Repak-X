@@ -46,7 +46,7 @@ const ClashPanel = ({ clashes, mods = [], onSetPriority, onClose }) => {
                                 <div key={i} className="clash-card">
                                     <div className="clash-file-path">
                                         <InsertDriveFileOutlined fontSize="small" className="clash-file-icon" />
-                                        {clash.file_path}
+                                        {clash.file_path.replace(/^\/?Game\//, '')}
                                     </div>
 
                                     <div className="clash-mods-list">

@@ -1,10 +1,9 @@
-# Ignore frontend files - Vite HMR handles these
+# Ignore frontend files - handled by Vite HMR
 *.css
 *.js
 *.jsx
 *.ts
 *.tsx
-*.json
 *.html
 *.svg
 *.png

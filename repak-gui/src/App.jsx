@@ -16,13 +16,15 @@ import {
   GridView as GridViewIcon,
   ViewModule as ViewModuleIcon,
   ViewList as ViewListIcon,
+  ViewHeadline as ViewHeadlineIcon,
   ViewSidebar as ViewSidebarIcon,
   PlayArrow as PlayArrowIcon,
-  Check as CheckIcon
+  Check as CheckIcon,
 } from '@mui/icons-material'
 import { RiDeleteBin2Fill } from 'react-icons/ri'
 import { FaTag, FaToolbox } from "react-icons/fa6"
 import { IoMdWifi, IoIosSettings } from "react-icons/io"
+import { GrInstall } from "react-icons/gr"
 import Checkbox from './components/ui/Checkbox'
 import ModDetailsPanel from './components/ModDetailsPanel'
 import ModsList from './components/ModsList'
@@ -37,6 +39,7 @@ import InputPromptModal from './components/InputPromptModal'
 
 import { AuroraText } from './components/ui/AuroraText'
 import { AlertProvider, useAlert } from './components/AlertHandler'
+import { useGlobalTooltips } from './hooks/useGlobalTooltips'
 import Switch from './components/ui/Switch'
 import NumberInput from './components/ui/NumberInput'
 import characterDataStatic from './data/character_data.json'
@@ -44,8 +47,10 @@ import './App.css'
 import './styles/theme.css'
 import './styles/Badges.css'
 import './styles/Fonts.css'
+import './styles/GlobalTooltips.css'
 import ModularLogo from './components/ui/ModularLogo'
 import HeroFilterDropdown from './components/HeroFilterDropdown'
+import TagFilterDropdown from './components/TagFilterDropdown'
 import ShortcutsHelpModal from './components/ShortcutsHelpModal'
 
 // Utility functions
@@ -53,6 +58,8 @@ import { toTagArray } from './utils/tags'
 import { detectHeroes } from './utils/heroes'
 import { formatFileSize, normalizeModBaseName } from './utils/format'
 import { getAdditionalCategories } from './utils/mods'
+
+import TitleBar from './components/TitleBar'
 
 // Lazy load heavy panels
 const InstallModPanel = lazy(() => import('./components/InstallModPanel'))
@@ -69,6 +76,7 @@ function App() {
   const [showHeroIcons, setShowHeroIcons] = useState(false);
   const [showHeroBg, setShowHeroBg] = useState(false);
   const [showModType, setShowModType] = useState(false);
+  const [showExperimental, setShowExperimental] = useState(false);
 
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
@@ -138,6 +146,7 @@ function App() {
   const [selectedFolderId, setSelectedFolderId] = useState('all')
   const [viewMode, setViewMode] = useState('list') // 'grid', 'compact', 'list'
   const [contextMenu, setContextMenu] = useState(null) // { x, y, mod }
+  const [isLogDrawerOpen, setIsLogDrawerOpen] = useState(false)
 
   const [clashes, setClashes] = useState([])
   const [launchSuccess, setLaunchSuccess] = useState(false)
@@ -156,6 +165,9 @@ function App() {
   // Alert system hook
   const alert = useAlert();
 
+  // Global tooltips - replaces native browser tooltips with styled ones
+  useGlobalTooltips();
+
   const handleCheckClashes = async () => {
     try {
       setStatus('Checking for clashes...')
@@ -165,6 +177,44 @@ function App() {
       setStatus(`Found ${result.length} clashes`)
     } catch (error) {
       setStatus('Error checking clashes: ' + error)
+    }
+  }
+
+  const handleCheckSingleModClashes = async (mod) => {
+    try {
+      setStatus(`Checking conflicts for ${mod.customName || mod.mod_name || 'mod'}...`)
+      const conflicts = await invoke('check_single_mod_conflicts', { modPath: mod.path })
+
+      // Transform SingleModConflict objects to ModClash format for the ClashPanel
+      // Backend SingleModConflict: { conflicting_mod_path, conflicting_mod_name, overlapping_files, ... }
+      // Frontend ModClash expected: { file_path, mod_paths: [path1, path2] }
+
+      const fileMap = new Map() // file_path -> Set(mod_paths)
+
+      if (conflicts && conflicts.length > 0) {
+        conflicts.forEach(conflict => {
+          conflict.overlapping_files.forEach(file => {
+            if (!fileMap.has(file)) {
+              fileMap.set(file, new Set())
+            }
+            // Add both the checked mod and the conflicting mod
+            fileMap.get(file).add(mod.path)
+            fileMap.get(file).add(conflict.conflicting_mod_path)
+          })
+        })
+      }
+
+      const transformedClashes = Array.from(fileMap.entries()).map(([file_path, modPathsSet]) => ({
+        file_path,
+        mod_paths: Array.from(modPathsSet)
+      }))
+
+      setClashes(transformedClashes)
+      setPanel('clash', true)
+      setStatus(`Found ${transformedClashes.length} conflicts for this mod`)
+    } catch (error) {
+      setStatus('Error checking mod conflicts: ' + error)
+      console.error(error)
     }
   }
 
@@ -310,11 +360,27 @@ function App() {
       }
 
       // Show persistent error toast for crashes
-      alert.showAlert({
-        color: 'danger',
-        title: payload.title || 'Game Crashed',
-        description: enhancedDesc,
-        duration: 0 // Persistent - user must dismiss
+      alert.crash(payload.title, enhancedDesc, {
+        action: {
+          label: 'Details',
+          onClick: () => {
+            const report = [
+              '--- CRASH REPORT ---',
+              `Timestamp: ${new Date().toLocaleString()}`,
+              `Type: ${payload.crash_type || 'Unknown'}`,
+              `Error: ${payload.error_message || 'N/A'}`,
+              `Asset: ${payload.asset_path || 'N/A'}`,
+              `Is Mesh Crash: ${payload.is_mesh_crash ? 'Yes' : 'No'}`,
+              '-------------------',
+              'Full Details for dev debugging:',
+              JSON.stringify(payload, null, 2),
+              '-------------------'
+            ]
+            setInstallLogs(report)
+            setIsLogDrawerOpen(true)
+            alert.info('Crash Details', 'Report opened in Log Drawer.')
+          }
+        }
       })
 
       // Log detailed crash info to console for debugging
@@ -557,6 +623,14 @@ function App() {
         setCharacterData(charData)
       } catch (charErr) {
         console.error('Failed to fetch character data:', charErr)
+      }
+
+      // Fetch stored USMAP path
+      try {
+        const usmapPath = await invoke('get_usmap_path')
+        setGlobalUsmap(usmapPath)
+      } catch (err) {
+        console.error('Failed to fetch usmap path:', err)
       }
 
       await loadMods()
@@ -821,7 +895,9 @@ function App() {
     // No confirmation prompt needed here, the hold-to-delete button handles the intent
 
     try {
-      await invoke('delete_mod', { path: modPath })
+      // Strip .bak_repak extension to get base path for proper deletion of all associated files
+      const basePath = modPath.replace(/\.bak_repak$/i, '.pak')
+      await invoke('delete_mod', { path: basePath })
       setStatus('Mod deleted')
 
       // Clear selection if the deleted mod was selected
@@ -1365,14 +1441,26 @@ function App() {
       const isInputActive = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA'
       if (isInputActive && key !== 'escape' && !(ctrl && key === 'f')) return
 
+      // F5 - Disable browser refresh
+      if (key === 'f5') {
+        e.preventDefault()
+        return
+      }
+      // Ctrl+R - Full app reload (reset all states)
+      else if (ctrl && key === 'r' && !shift) {
+        e.preventDefault()
+        alert.info('App Reloaded', 'Refreshed all data and resetted states.')
+        loadInitialData()
+      }
       // Ctrl+F - Focus search
-      if (ctrl && key === 'f') {
+      else if (ctrl && key === 'f') {
         e.preventDefault()
         searchInputRef.current?.focus()
       }
-      // Ctrl+Shift+R - Refresh mods
+      // Ctrl+Shift+R - Refresh mods only
       else if (ctrl && shift && key === 'r') {
         e.preventDefault()
+        alert.info('Mods Refreshed', 'Refreshed mods list.')
         loadMods()
       }
       // Ctrl+, - Settings
@@ -1424,7 +1512,7 @@ function App() {
 
         let newIndex = currentIndex
 
-        if (viewMode === 'list') {
+        if (viewMode === 'list' || viewMode === 'list-compact') {
           // List view: only up/down
           if (key === 'arrowup') newIndex = Math.max(0, currentIndex - 1)
           else if (key === 'arrowdown') newIndex = Math.min(filteredMods.length - 1, currentIndex + 1)
@@ -1608,13 +1696,21 @@ function App() {
     setShowHeroIcons(settings.showHeroIcons || false)
     setShowHeroBg(settings.showHeroBg || false)
     setShowModType(settings.showModType || false)
+    setShowExperimental(settings.showExperimental || false)
 
     // Save to localStorage for persistence
     localStorage.setItem('hideSuffix', JSON.stringify(settings.hideSuffix || false))
     localStorage.setItem('autoOpenDetails', JSON.stringify(settings.autoOpenDetails || false))
     localStorage.setItem('showHeroIcons', JSON.stringify(settings.showHeroIcons || false))
     localStorage.setItem('showHeroBg', JSON.stringify(settings.showHeroBg || false))
+    localStorage.setItem('showHeroBg', JSON.stringify(settings.showHeroBg || false))
     localStorage.setItem('showModType', JSON.stringify(settings.showModType || false))
+    localStorage.setItem('showExperimental', JSON.stringify(settings.showExperimental || false))
+
+    // Revert to normal list view if disabling experimental features while in compact list
+    if (settings.showExperimental === false && viewMode === 'list-compact') {
+      handleViewModeChange('list')
+    }
 
     setStatus('Settings saved')
   }
@@ -1631,6 +1727,7 @@ function App() {
     const savedShowHeroIcons = JSON.parse(localStorage.getItem('showHeroIcons') || 'false');
     const savedShowHeroBg = JSON.parse(localStorage.getItem('showHeroBg') || 'false');
     const savedShowModType = JSON.parse(localStorage.getItem('showModType') || 'false');
+    const savedShowExperimental = JSON.parse(localStorage.getItem('showExperimental') || 'false');
 
     handleThemeChange(savedTheme);
     handleAccentChange(savedAccent);
@@ -1640,6 +1737,7 @@ function App() {
     setShowHeroIcons(savedShowHeroIcons);
     setShowHeroBg(savedShowHeroBg);
     setShowModType(savedShowModType);
+    setShowExperimental(savedShowExperimental);
   }, []);
 
   // Add these handlers
@@ -1689,6 +1787,7 @@ function App() {
 
   return (
     <div className="app">
+      <TitleBar />
       <Suspense fallback={null}>
         {panels.install && (
           <InstallModPanel
@@ -1713,7 +1812,7 @@ function App() {
 
         {panels.settings && (
           <SettingsPanel
-            settings={{ globalUsmap, hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType }}
+            settings={{ globalUsmap, hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType, showExperimental }}
             onSave={handleSaveSettings}
             onClose={() => setPanel('settings', false)}
             theme={theme}
@@ -1940,19 +2039,14 @@ function App() {
           </div>
 
           <div className="action-controls">
-            <select
-              value={filterTag}
-              onChange={(e) => setFilterTag(e.target.value)}
-              className="filter-select-large"
-            >
-              <option value="">All Tags</option>
-              {allTags.map(tag => (
-                <option key={tag} value={tag}>{tag}</option>
-              ))}
-            </select>
+            <TagFilterDropdown
+              tags={allTags}
+              selectedTag={filterTag}
+              onSelect={setFilterTag}
+            />
 
             <button onClick={handleInstallModClick} className="btn-install-large">
-              <span className="install-icon">+</span>
+              <GrInstall className="install-icon" />
               <span className="install-text">Install Mod</span>
             </button>
           </div>
@@ -2094,7 +2188,7 @@ function App() {
                     <button
                       onClick={() => handleViewModeChange('compact')}
                       className={`btn-icon-small ${viewMode === 'compact' ? 'active' : ''}`}
-                      title="Compact View"
+                      title="Compact Grid View"
                     >
                       <ViewModuleIcon fontSize="small" />
                     </button>
@@ -2105,6 +2199,15 @@ function App() {
                     >
                       <ViewListIcon fontSize="small" />
                     </button>
+                    {showExperimental && (
+                      <button
+                        onClick={() => handleViewModeChange('list-compact')}
+                        className={`btn-icon-small ${viewMode === 'list-compact' ? 'active' : ''}`}
+                        title="Compact List View (Experimental)"
+                      >
+                        <ViewHeadlineIcon fontSize="small" />
+                      </button>
+                    )}
                   </div>
                   <div className="divider-vertical" />
                   <button
@@ -2115,7 +2218,7 @@ function App() {
                     <ViewSidebarIcon fontSize="small" style={{ transform: isRightPanelOpen ? 'none' : 'rotate(180deg)' }} />
                   </button>
                   <div className="divider-vertical" />
-                  <button onClick={loadMods} className="btn-ghost">
+                  <button onClick={loadMods} className="btn-ghost" title="Refresh list">
                     <RefreshIcon fontSize="small" />
                   </button>
                 </div>
@@ -2166,6 +2269,7 @@ function App() {
                 modDetails={modDetails}
                 characterData={characterData}
                 onRename={handleRenameMod}
+                onCheckConflicts={handleCheckSingleModClashes}
                 renamingModPath={renamingModPath}
                 onClearRenaming={() => setRenamingModPath(null)}
                 gridRef={modsGridRef}
@@ -2227,6 +2331,8 @@ function App() {
         onClear={() => setInstallLogs([])}
         progress={modLoadingProgress}
         isLoading={isModsLoading}
+        isOpen={isLogDrawerOpen}
+        onToggle={() => setIsLogDrawerOpen(v => !v)}
       />
 
       {
@@ -2261,6 +2367,7 @@ function App() {
                 setRenamingModPath(contextMenu.mod.path)
               }
             }}
+            onCheckConflicts={() => contextMenu.mod && handleCheckSingleModClashes(contextMenu.mod)}
             allTags={allTags}
             gamePath={gamePath}
           />

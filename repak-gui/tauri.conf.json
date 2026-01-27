@@ -33,12 +33,13 @@
       {
         "title": "Repak X",
         "width": 1400,
-        "height": 900,
+        "height": 950,
         "minWidth": 800,
         "minHeight": 600,
         "resizable": true,
         "fullscreen": false,
-        "decorations": true,
+        "decorations": false,
+        "transparent": false,
         "center": true,
         "devtools": true
       }
