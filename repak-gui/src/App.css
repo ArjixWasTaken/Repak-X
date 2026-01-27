@@ -1492,9 +1492,55 @@ input[type="text"]:focus {
   opacity: 0.5;
 }
 
-.folder-item.empty:hover {
-  opacity: 0.8;
+
+/* Danger Button Styles (Hold to Delete) */
+
+/* Danger Button Styles (Hold to Delete) */
+.btn-ghost.danger {
+  color: var(--danger);
+  position: relative;
+  overflow: hidden;
+  border-color: rgba(255, 68, 68, 0.3);
 }
+
+.btn-ghost.danger:hover {
+  background: rgba(255, 68, 68, 0.1);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.btn-ghost.danger .danger-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 100%;
+  background: var(--danger);
+  z-index: 1;
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform 0.2s ease;
+  opacity: 0.2;
+}
+
+.btn-ghost.danger:hover .danger-bg {
+  transform: scaleX(1);
+}
+
+.btn-ghost.danger.holding .danger-bg {
+  transform: scaleX(0);
+  transition: transform 2s linear;
+  opacity: 1;
+}
+
+/* Bulk Controls Layout */
+.bulk-controls {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+
 
 .folder-name {
   flex: 1;
@@ -1548,7 +1594,8 @@ input[type="text"]:focus {
 .bulk-actions-toolbar {
   padding: 0.5rem 1rem;
   background: var(--bg-darker);
-  border-bottom: 1px solid var(--panel-border);
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: space-between;

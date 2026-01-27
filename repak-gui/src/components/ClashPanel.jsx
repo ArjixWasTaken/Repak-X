@@ -1,4 +1,5 @@
 import React from 'react'
+import { IoMdWarning } from "react-icons/io"
 import {
     Close,
     WarningAmberRounded,
@@ -14,7 +15,7 @@ const ClashPanel = ({ clashes, mods = [], onSetPriority, onClose }) => {
             <div className="clash-panel-content" onClick={e => e.stopPropagation()}>
                 <div className="clash-header">
                     <h2>
-                        <WarningAmberRounded style={{ color: 'var(--danger)' }} />
+                        <IoMdWarning style={{ color: 'var(--danger)' }} />
                         Mod Conflicts
                         {clashes.length > 0 && (
                             <span style={{

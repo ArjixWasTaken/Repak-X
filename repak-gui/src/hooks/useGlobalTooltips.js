@@ -19,7 +19,7 @@ export const useGlobalTooltips = () => {
 
       // Force layout to get accurate dimensions
       tooltip.offsetHeight;
-      
+
       // Position tooltip
       const tooltipRect = tooltip.getBoundingClientRect();
       const viewportWidth = window.innerWidth;
@@ -28,7 +28,7 @@ export const useGlobalTooltips = () => {
       // Default to top placement
       let top = targetRect.top - tooltipRect.height - 8;
       let left = targetRect.left + targetRect.width / 2 - tooltipRect.width / 2;
-      
+
       tooltip.style.visibility = ''; // Show after positioning
 
       // Adjust if tooltip goes off screen
@@ -87,7 +87,7 @@ export const useGlobalTooltips = () => {
 
       clearTimeout(hideTimeout);
       clearTimeout(showTimeout);
-      
+
       showTimeout = setTimeout(() => {
         if (currentTarget === target) {
           const rect = target.getBoundingClientRect();
@@ -98,11 +98,11 @@ export const useGlobalTooltips = () => {
 
     const handleMouseLeave = (e) => {
       const target = e.target.closest('[data-original-title]');
-      
+
       // Always clear timeouts and remove tooltip on any mouse leave
       clearTimeout(showTimeout);
       clearTimeout(hideTimeout);
-      
+
       if (target) {
         // Restore original title
         const originalTitle = target.getAttribute('data-original-title');
@@ -114,19 +114,26 @@ export const useGlobalTooltips = () => {
 
       // Clear current target
       currentTarget = null;
-      
+
       // Remove tooltip immediately
+      removeTooltip();
+    };
+
+    const handleMouseDown = () => {
+      clearTimeout(showTimeout);
       removeTooltip();
     };
 
     // Add event listeners
     document.addEventListener('mouseover', handleMouseEnter, true);
     document.addEventListener('mouseout', handleMouseLeave, true);
+    document.addEventListener('mousedown', handleMouseDown, true);
 
     // Cleanup
     return () => {
       document.removeEventListener('mouseover', handleMouseEnter, true);
       document.removeEventListener('mouseout', handleMouseLeave, true);
+      document.removeEventListener('mousedown', handleMouseDown, true);
       clearTimeout(showTimeout);
       clearTimeout(hideTimeout);
       removeTooltip();

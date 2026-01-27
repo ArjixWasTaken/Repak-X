@@ -22,8 +22,9 @@ import {
   Check as CheckIcon,
 } from '@mui/icons-material'
 import { RiDeleteBin2Fill } from 'react-icons/ri'
+import { MdDriveFileMoveOutline } from "react-icons/md"
 import { FaTag, FaToolbox } from "react-icons/fa6"
-import { IoMdWifi, IoIosSettings } from "react-icons/io"
+import { IoMdWifi, IoIosSettings, IoMdWarning } from "react-icons/io"
 import { GrInstall } from "react-icons/gr"
 import Checkbox from './components/ui/Checkbox'
 import ModDetailsPanel from './components/ModDetailsPanel'
@@ -50,7 +51,7 @@ import './styles/Fonts.css'
 import './styles/GlobalTooltips.css'
 import ModularLogo from './components/ui/ModularLogo'
 import HeroFilterDropdown from './components/HeroFilterDropdown'
-import TagFilterDropdown from './components/TagFilterDropdown'
+import CustomDropdown from './components/CustomDropdown'
 import ShortcutsHelpModal from './components/ShortcutsHelpModal'
 
 // Utility functions
@@ -161,6 +162,10 @@ function App() {
   const searchInputRef = useRef(null)
   const modsGridRef = useRef(null)
   const gameRunningRef = useRef(false)
+
+  // Bulk delete state
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false)
+  const deleteBulkTimeoutRef = useRef(null)
 
   // Alert system hook
   const alert = useAlert();
@@ -276,6 +281,70 @@ function App() {
 
   const closeContextMenu = () => {
     setContextMenu(null)
+  }
+
+  // Bulk Delete Handlers
+  const handleBulkDelete = async () => {
+    if (selectedMods.size === 0) return
+
+    try {
+      setStatus(`Deleting ${selectedMods.size} mods...`)
+      setModLoadingProgress(-1)
+      setIsModsLoading(true)
+
+      const modPaths = Array.from(selectedMods)
+      let deletedCount = 0
+      let errors = []
+
+      for (const path of modPaths) {
+        try {
+          // Find mod details to check if it's a folder mod or regular file
+          // If we don't have details, try delete_mod anyway
+          await invoke('delete_mod', { modPath: path })
+          deletedCount++
+        } catch (e) {
+          console.error(`Failed to delete ${path}:`, e)
+          errors.push(path)
+        }
+      }
+
+      if (errors.length > 0) {
+        alert.warning(
+          'Bulk Delete Incomplete',
+          `Deleted ${deletedCount} mods. Failed to delete ${errors.length} mods.`
+        )
+      } else {
+        alert.success('Bulk Delete', `Successfully deleted ${deletedCount} mods.`)
+      }
+
+      setSelectedMods(new Set()) // Clear selection
+      await loadMods()
+      await loadFolders()
+
+    } catch (e) {
+      console.error('Bulk delete failed:', e)
+      setStatus('Bulk delete failed: ' + e)
+    } finally {
+      setIsModsLoading(false)
+      setModLoadingProgress(0)
+    }
+  }
+
+  const handleBulkDeleteDown = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDeletingBulk(true)
+    deleteBulkTimeoutRef.current = setTimeout(() => {
+      handleBulkDelete()
+      setIsDeletingBulk(false)
+    }, 2000)
+  }
+
+  const handleBulkDeleteUp = (e) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDeletingBulk(false)
+    if (deleteBulkTimeoutRef.current) clearTimeout(deleteBulkTimeoutRef.current)
   }
 
   useEffect(() => {
@@ -948,17 +1017,8 @@ function App() {
     }
   }
 
-  const handleCreateFolder = async () => {
-    const name = prompt('Enter folder name:')
-    if (!name) return
-
-    try {
-      await invoke('create_folder', { name })
-      await loadFolders()
-      setStatus('Folder created')
-    } catch (error) {
-      setStatus('Error creating folder: ' + error)
-    }
+  const handleCreateFolder = () => {
+    setNewFolderPrompt({ paths: [] })
   }
 
   // Create a folder and return its ID (for use by overlay components)
@@ -977,18 +1037,26 @@ function App() {
     }
   }
 
-  // Handle new folder prompt confirmation (from drop zone)
+  // Handle new folder prompt confirmation (from drop zone or manual creation)
   const handleNewFolderConfirm = async (folderName) => {
-    if (!newFolderPrompt || !newFolderPrompt.paths) return
+    if (!newFolderPrompt) return
 
-    const paths = newFolderPrompt.paths
+    const paths = newFolderPrompt.paths || []
     const pathCount = paths.length
     const pathsCopy = [...paths]
+
+    // Check specific to quick organize flow
+    const isQuickOrganize = pathCount > 0
+
     setNewFolderPrompt(null) // Close the modal
 
     // Start progress bar (indeterminate)
-    setIsModsLoading(true)
-    setModLoadingProgress(-1)
+    // Only show full loading UI if we are doing a quick organize (installing files)
+    // For simple folder creation, we can just use the status bar, or a lighter loader
+    if (isQuickOrganize) {
+      setIsModsLoading(true)
+      setModLoadingProgress(-1)
+    }
 
     // Use promise toast for loading state and result
     alert.promise(
@@ -998,22 +1066,18 @@ function App() {
           await invoke('create_folder', { name: folderName })
           await loadFolders()
 
-          // Then quick organize to the new folder
-          await invoke('quick_organize', { paths: pathsCopy, targetFolder: folderName })
-          await loadMods()
-          await loadFolders()
-          setStatus(`Installed ${pathCount} item(s) to "${folderName}"!`)
+          if (isQuickOrganize) {
+            // Then quick organize to the new folder
+            await invoke('quick_organize', { paths: pathsCopy, targetFolder: folderName })
+            await loadMods()
+            await loadFolders()
+            setStatus(`Installed ${pathCount} item(s) to "${folderName}"!`)
 
-          // Show warning after success if game is running
-          if (gameRunning) {
-            alert.warning(
-              'Game Running',
-              'Mods installed, but changes will only take effect after restarting the game.',
-              { duration: 8000 }
-            )
+            return { count: pathCount, folder: folderName, isInstall: true }
+          } else {
+            setStatus(`Folder "${folderName}" created`)
+            return { folder: folderName, isInstall: false }
           }
-
-          return { count: pathCount, folder: folderName }
         } finally {
           setIsModsLoading(false)
           setModLoadingProgress(0)
@@ -1021,15 +1085,19 @@ function App() {
       })(),
       {
         loading: {
-          title: 'Creating Folder & Installing',
-          description: `Creating "${folderName}" and copying ${pathCount} file${pathCount > 1 ? 's' : ''}...`
+          title: isQuickOrganize ? 'Creating Folder & Installing' : 'Creating Folder',
+          description: isQuickOrganize
+            ? `Creating "${folderName}" and copying ${pathCount} file${pathCount > 1 ? 's' : ''}...`
+            : `Creating folder "${folderName}"...`
         },
         success: (result) => ({
-          title: 'Installation Complete',
-          description: `Created folder and installed ${result.count} mod${result.count > 1 ? 's' : ''}`
+          title: result.isInstall ? 'Installation Complete' : 'Folder Created',
+          description: result.isInstall
+            ? `Created folder and installed ${result.count} mod${result.count > 1 ? 's' : ''}`
+            : `Successfully created "${result.folder}"`
         }),
         error: (err) => ({
-          title: 'Installation Failed',
+          title: 'Operation Failed',
           description: String(err)
         })
       }
@@ -1041,6 +1109,10 @@ function App() {
 
     try {
       await invoke('delete_folder', { id: folderId })
+      if (selectedFolderId === folderId) {
+        setSelectedFolderId('all')
+      }
+
       await loadFolders()
       await loadMods()
       setStatus('Folder deleted')
@@ -1894,9 +1966,9 @@ function App() {
       {/* New Folder Prompt Modal - for creating folders during drop */}
       <InputPromptModal
         isOpen={!!newFolderPrompt}
-        title="Create New Folder"
+        title={newFolderPrompt?.paths?.length > 0 ? "Create Folder & Install" : "Create New Folder"}
         placeholder="Enter folder name..."
-        confirmText="Create & Install"
+        confirmText={newFolderPrompt?.paths?.length > 0 ? "Create & Install" : "Create"}
         onConfirm={handleNewFolderConfirm}
         onCancel={() => {
           setNewFolderPrompt(null)
@@ -2039,10 +2111,12 @@ function App() {
           </div>
 
           <div className="action-controls">
-            <TagFilterDropdown
-              tags={allTags}
-              selectedTag={filterTag}
-              onSelect={setFilterTag}
+            <CustomDropdown
+              options={[{ value: '', label: 'View All' }, ...allTags]}
+              value={filterTag}
+              onChange={setFilterTag}
+              placeholder="All Tags"
+              icon={<FaTag style={{ fontSize: '1.2rem', opacity: 1, color: 'var(--accent-primary)' }} />}
             />
 
             <button onClick={handleInstallModClick} className="btn-install-large">
@@ -2098,9 +2172,24 @@ function App() {
                       availableCharacters={availableCharacters}
                       selectedCharacters={selectedCharacters}
                       modDetails={modDetails}
-                      onToggle={(char) => setSelectedCharacters(prev => {
+                      onToggle={(target) => setSelectedCharacters(prev => {
                         const next = new Set(prev);
-                        next.has(char) ? next.delete(char) : next.add(char);
+
+                        if (Array.isArray(target)) {
+                          // Bulk toggle logic
+                          const allSelected = target.every(t => next.has(t));
+                          if (allSelected) {
+                            // If all are selected, deselect all
+                            target.forEach(t => next.delete(t));
+                          } else {
+                            // Otherwise, select all (add missing ones)
+                            target.forEach(t => next.add(t));
+                          }
+                        } else {
+                          // Single toggle logic
+                          next.has(target) ? next.delete(target) : next.add(target);
+                        }
+
                         return next;
                       })}
                     />
@@ -2174,7 +2263,7 @@ function App() {
                 </div>
                 <div className="header-actions">
                   <button onClick={handleCheckClashes} className="btn-ghost btn-check-conflicts" title="Check for conflicts">
-                    ⚠️ Check Conflicts
+                    <IoMdWarning className="warning-icon" style={{ color: 'var(--accent-primary)', width: '18px', height: '18px' }} /> Check Conflicts
                   </button>
                   <div className="divider-vertical" />
                   <div className="view-switcher">
@@ -2226,27 +2315,47 @@ function App() {
 
               {/* Bulk Actions Toolbar */}
               <div className={`bulk-actions-toolbar ${selectedMods.size === 0 ? 'inactive' : ''}`}>
-                <div className="selection-info">
-                  {selectedMods.size} selected
-                  <button onClick={handleDeselectAll} className="btn-link">Clear</button>
+                <div className="selection-info" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>{selectedMods.size} selected</span>
+                  <button onClick={() => {
+                    const allPaths = filteredMods.map(m => m.path)
+                    setSelectedMods(new Set(allPaths))
+                  }} className="btn-ghost" style={{ padding: '4px 12px', height: '32px' }}>Select All</button>
+                  <button onClick={handleDeselectAll} className="btn-ghost" style={{ padding: '4px 12px', height: '32px' }}>Clear</button>
                 </div>
                 <div className="bulk-controls">
-                  <select
-                    className="toolbar-select"
-                    disabled={selectedMods.size === 0}
-                    defaultValue=""
-                    onChange={(e) => {
-                      const folderId = e.target.value
-                      if (!folderId) return
-                      handleAssignToFolder(folderId)
-                      e.target.value = ''
-                    }}
+                  <div style={{ width: '200px', height: '40px' }}>
+                    <CustomDropdown
+                      icon={<MdDriveFileMoveOutline style={{ fontSize: '1.2rem', opacity: 0.7 }} />}
+                      options={[
+                        { value: 'root', label: 'Root (~mods)' }, // Option to move back to root
+                        ...folders.filter(f => f.name !== '~mods').map(f => ({ value: f.id, label: f.name }))
+                      ]}
+                      value="" // Always reset after selection locally handled by onChange logic below
+                      onChange={(val) => {
+                        if (!val) return
+                        if (val === 'root') handleAssignToFolder(null) // Handle move to root
+                        else handleAssignToFolder(val)
+                      }}
+                      placeholder="Move to..."
+                      disabled={selectedMods.size === 0}
+                    />
+                  </div>
+
+                  <div
+                    className={`btn-ghost danger ${isDeletingBulk ? 'holding' : ''}`}
+                    onMouseDown={handleBulkDeleteDown}
+                    onMouseUp={handleBulkDeleteUp}
+                    onMouseLeave={handleBulkDeleteUp}
+                    style={{ marginLeft: '1rem', height: '40px' }}
+                    title="Hold 2s to delete selected mods"
                   >
-                    <option value="">Move to...</option>
-                    {folders.map(f => (
-                      <option key={f.id} value={f.id}>{f.name}</option>
-                    ))}
-                  </select>
+                    <div className="danger-bg" />
+                    <span style={{ position: 'relative', zIndex: 2, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <RiDeleteBin2Fill />
+                      {`Delete (${selectedMods.size})`}
+                    </span>
+                  </div>
                 </div>
               </div>
 

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { IoMdWarning } from "react-icons/io"
 import './ContextMenu.css'
 
 const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCreateFolder, folders, onDelete, onToggle, onRename, onCheckConflicts, allTags, gamePath }) => {
@@ -86,7 +87,6 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
     return (
       <div ref={menuRef} className="context-menu" style={{ top: adjustedPos.y, left: adjustedPos.x }} onClick={(e) => e.stopPropagation()}>
         <div className="context-menu-header">{folder.name}</div>
-        <div className="context-menu-separator" />
         <div className="context-menu-item" onClick={async () => {
           try {
             // Construct full folder path from gamePath + folder.id
@@ -176,7 +176,7 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
       <div className="context-menu-separator" />
 
       <div className="context-menu-item" onClick={() => { if (onCheckConflicts) onCheckConflicts(); onClose(); }}>
-        ⚠️ Check Conflicts
+        Check Conflicts <IoMdWarning className="warning-icon-small" style={{ fill: 'var(--accent-primary)' }} />
       </div>
 
       <div className="context-menu-separator" />
