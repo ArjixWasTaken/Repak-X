@@ -893,6 +893,12 @@ pub fn strip_mipmaps_native(file_path: &str, usmap_path: Option<&str>) -> Result
     run_on_global(toolkit.strip_mipmaps_native(file_path, usmap_path))
 }
 
+/// Patch mesh materials in a uasset file (using global singleton)
+pub fn patch_mesh(file_path: &str, uexp_path: &str) -> Result<()> {
+    let toolkit = get_global_toolkit()?;
+    run_on_global(toolkit.patch_mesh(file_path, uexp_path))
+}
+
 /// Batch strip mipmaps from multiple textures (using global singleton)
 /// Returns (success_count, skip_count, error_count, processed_file_names)
 pub fn batch_strip_mipmaps_native(file_paths: &[String], usmap_path: Option<&str>) -> Result<(usize, usize, usize, Vec<String>)> {
@@ -1130,25 +1136,103 @@ pub fn recompress_iostore(utoc_path: &str) -> Result<String> {
     })
 }
 
-/// Extract IoStore to legacy format (using global singleton)
-pub fn extract_iostore(utoc_path: &str, output_dir: &str, aes_key: Option<&str>) -> Result<usize> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::ExtractIoStore {
-            file_path: utoc_path.to_string(),
-            output_path: output_dir.to_string(),
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("extract_iostore failed: {}", response.message);
+/// Find UAssetTool.exe for CLI operations
+fn find_uasset_tool() -> Result<std::path::PathBuf> {
+    // Try to find the tool in the expected location
+    let exe_path = std::env::current_exe()?;
+    let exe_dir = exe_path.parent().context("Failed to get executable directory")?;
+    let tool_path = exe_dir.join("uassettool").join("UAssetTool.exe");
+    
+    if tool_path.exists() {
+        return Ok(tool_path);
+    }
+    
+    // Try relative to workspace
+    let workspace_tool = std::path::Path::new("target/uassettool/UAssetTool.exe");
+    if workspace_tool.exists() {
+        return Ok(workspace_tool.to_path_buf());
+    }
+    
+    // Try looking in the source tools folder as fallback for dev
+    let dev_tool = std::path::Path::new("uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/publish/UAssetTool.exe");
+    if dev_tool.exists() {
+        return Ok(dev_tool.to_path_buf());
+    }
+    
+    // Default assumption - return the expected path even if it doesn't exist
+    Ok(tool_path)
+}
+
+/// Extract IoStore to legacy format using CLI command (more reliable than JSON API)
+/// Uses `extract_iostore_legacy` with `--mod` argument for proper mod extraction
+pub fn extract_iostore(utoc_path: &str, output_dir: &str, _aes_key: Option<&str>) -> Result<usize> {
+    log::info!("[extract_iostore] Starting CLI extraction: {} -> {}", utoc_path, output_dir);
+    
+    // Find UAssetTool.exe
+    let tool_path = find_uasset_tool()?;
+    log::info!("[extract_iostore] Using tool: {:?}", tool_path);
+    
+    // Determine paks directory by walking up from utoc path to find ~mods folder
+    let utoc_path_buf = std::path::PathBuf::from(utoc_path);
+    let mut paks_dir: Option<std::path::PathBuf> = None;
+    let mut current = utoc_path_buf.parent();
+    while let Some(dir) = current {
+        if let Some(name) = dir.file_name() {
+            if name.to_string_lossy().eq_ignore_ascii_case("~mods") {
+                paks_dir = dir.parent().map(|p| p.to_path_buf());
+                break;
+            }
         }
-        
-        let count = response.data
-            .and_then(|d| d.get("extracted_count").and_then(|v| v.as_u64()))
-            .unwrap_or(0) as usize;
-        Ok(count)
-    })
+        current = dir.parent();
+    }
+    
+    let paks_dir = paks_dir.ok_or_else(|| anyhow::anyhow!("Could not find Paks directory (utoc must be in ~mods folder)"))?;
+    log::info!("[extract_iostore] Paks directory: {:?}", paks_dir);
+    
+    // Build CLI command: extract_iostore_legacy <paks_dir> <output_dir> --mod <utoc_path>
+    let mut cmd = std::process::Command::new(&tool_path);
+    cmd.arg("extract_iostore_legacy")
+        .arg(&paks_dir)
+        .arg(output_dir)
+        .arg("--mod")
+        .arg(utoc_path);
+    
+    // Hide window on Windows
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    
+    log::info!("[extract_iostore] Running: {:?}", cmd);
+    
+    let output = cmd.output()
+        .map_err(|e| anyhow::anyhow!("Failed to run UAssetTool: {}", e))?;
+    
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    
+    log::info!("[extract_iostore] stdout: {}", stdout);
+    if !stderr.is_empty() {
+        log::info!("[extract_iostore] stderr: {}", stderr);
+    }
+    
+    if !output.status.success() {
+        anyhow::bail!("UAssetTool extraction failed: {}\n{}", stdout, stderr);
+    }
+    
+    // Parse output to get count - look for "Extraction complete: X converted"
+    let count = stdout.lines()
+        .find(|line| line.contains("converted"))
+        .and_then(|line| {
+            // Parse "Extraction complete: X converted, Y failed, Z skipped"
+            line.split_whitespace()
+                .find_map(|word| word.parse::<usize>().ok())
+        })
+        .unwrap_or(0);
+    
+    log::info!("[extract_iostore] Extracted {} files", count);
+    Ok(count)
 }
 
 /// Extract ScriptObjects.bin from game paks (using global singleton)

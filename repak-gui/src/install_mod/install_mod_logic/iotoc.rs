@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 use crate::install_mod::install_mod_logic::pak_files::repak_dir;
-use crate::install_mod::install_mod_logic::patch_meshes;
 use crate::install_mod::InstallableMod;
 use crate::uasset_api_integration::batch_convert_textures_to_inline;
 use crate::utils::collect_files;
@@ -91,12 +90,7 @@ pub fn convert_to_iostore_directory(
         }
     }
 
-    // Skeletal Mesh patching (separate workflow, not interfered with)
-    // Pass source mod path to check for existing patched_files marker (prevents double-patching)
-    if pak.fix_mesh {
-        let source_mod_path = if pak.is_dir { Some(&pak.mod_path) } else { None };
-        patch_meshes::mesh_patch_with_source(&mut paths, &to_pak_dir.to_path_buf(), source_mod_path)?;
-    }
+    // Note: Skeletal Mesh patching is now handled automatically by UAssetTool during IoStore conversion
 
     // Process textures using UAssetAPI to convert them to inline format
     // This modifies the .uasset to clear DataResources and embeds mip data in export.Extras

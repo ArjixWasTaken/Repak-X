@@ -453,12 +453,11 @@ struct InstallableModInfo {
     mod_type: String,
     is_dir: bool,
     path: String,
-    auto_fix_mesh: bool,
     auto_fix_texture: bool,
     auto_fix_serialize_size: bool,
     auto_to_repak: bool,
     /// Whether the mod contains any .uasset/.uexp/.ubulk/.umap files
-    /// Used by frontend to lock/unlock certain toggles (e.g., fix mesh/texture only applies to uasset mods)
+    /// Used by frontend to lock/unlock certain toggles (e.g., fix texture only applies to uasset mods)
     contains_uassets: bool,
 }
 
@@ -527,8 +526,9 @@ async fn parse_dropped_files(
             .to_string();
         
         // Determine mod type and auto-detection flags
-        // 5-tuple: (mod_type, auto_fix_mesh, auto_fix_texture, auto_fix_serialize_size, contains_uassets)
-        let (mod_type, auto_fix_mesh, auto_fix_texture, auto_fix_serialize_size, contains_uassets) = if path.is_dir() {
+        // 4-tuple: (mod_type, auto_fix_texture, auto_fix_serialize_size, contains_uassets)
+        // Note: mesh patching is handled automatically by UAssetTool
+        let (mod_type, auto_fix_texture, auto_fix_serialize_size, contains_uassets) = if path.is_dir() {
             // First check if directory contains multiple PAK files - if so, process each PAK separately
             use walkdir::WalkDir;
             let mut pak_files = Vec::new();
@@ -653,12 +653,12 @@ async fn parse_dropped_files(
                     let has_uassets = contains_uasset_files(&all_files_absolute);
                     let _ = window.emit("install_log", format!("[Detection] Contains UAssets: {}", has_uassets));
                     
-                    (mod_type, has_skeletal_mesh, has_texture, has_static_mesh, has_uassets)
+                    (mod_type, has_texture, has_static_mesh, has_uassets)
                 } else {
-                    ("Directory".to_string(), false, false, false, true) // Default to true for safety
+                    ("Directory".to_string(), false, false, true) // Default to true for safety
                 }
             } else {
-                ("Directory".to_string(), false, false, false, true) // Default to true for safety
+                ("Directory".to_string(), false, false, true) // Default to true for safety
             }
         } else {
             // Get file extension
@@ -854,7 +854,6 @@ async fn parse_dropped_files(
                                             mod_type,
                                             is_dir: false,
                                             path: path_str,
-                                            auto_fix_mesh: has_skeletal_mesh,
                                             auto_fix_texture: has_texture,
                                             auto_fix_serialize_size: has_static_mesh,
                                             auto_to_repak: !is_iostore,  // Don't repak IoStore packages
@@ -924,7 +923,6 @@ async fn parse_dropped_files(
                                         mod_type,
                                         is_dir: true,
                                         path: path_str,
-                                        auto_fix_mesh: has_skeletal_mesh,
                                         auto_fix_texture: has_texture,
                                         auto_fix_serialize_size: has_static_mesh,
                                         auto_to_repak: false,
@@ -937,7 +935,7 @@ async fn parse_dropped_files(
                 }
                 
                 // Fallback if extraction/analysis failed
-                ("Archive".to_string(), false, false, false, true) // Default to true for safety
+                ("Archive".to_string(), false, false, true) // Default to true for safety
             } else if ext == "pak" {
                 // Check if this is an IoStore package (has .utoc and .ucas companions)
                 let utoc_path = path.with_extension("utoc");
@@ -1066,17 +1064,18 @@ async fn parse_dropped_files(
                             use crate::install_mod::contains_uasset_files;
                             let has_uassets = contains_uasset_files(&files);
                             
-                            return Ok(vec![InstallableModInfo {
+                            // Push this PAK mod and continue processing other files
+                            mods.push(InstallableModInfo {
                                 mod_name,
                                 mod_type,
                                 is_dir: false,
                                 path: path_str,
-                                auto_fix_mesh: has_skeletal_mesh,
                                 auto_fix_texture: has_texture,
                                 auto_fix_serialize_size: has_static_mesh,
                                 auto_to_repak: !is_iostore,  // Don't repak IoStore packages
                                 contains_uassets: has_uassets,
-                            }]);
+                            });
+                            continue; // Continue to next file instead of returning
                         }
                     }
                     
@@ -1085,9 +1084,9 @@ async fn parse_dropped_files(
                     "Unknown".to_string()
                 };
                 
-                (mod_type, false, false, false, true) // Default to true for safety
+                (mod_type, false, false, true) // Default to true for safety
             } else {
-                ("Unknown".to_string(), false, false, false, true) // Default to true for safety
+                ("Unknown".to_string(), false, false, true) // Default to true for safety
             }
         };
 
@@ -1101,7 +1100,6 @@ async fn parse_dropped_files(
             mod_type,
             is_dir: path.is_dir(),
             path: path_str,
-            auto_fix_mesh,
             auto_fix_texture,
             auto_fix_serialize_size,
             auto_to_repak,
@@ -1117,8 +1115,6 @@ struct ModToInstall {
     path: String,
     #[serde(rename = "customName")]
     custom_name: Option<String>,
-    #[serde(rename = "fixMesh")]
-    fix_mesh: bool,
     #[serde(rename = "fixTexture")]
     fix_texture: bool,
     #[serde(rename = "fixSerializeSize")]
@@ -1584,8 +1580,7 @@ async fn install_mods(
                 }
             }
 
-            // Apply fix settings
-            installable.fix_mesh = mod_to_install.fix_mesh;
+            // Apply fix settings (mesh patching is handled automatically by UAssetTool)
             installable.fix_textures = mod_to_install.fix_texture;
             installable.fix_serialsize_header = mod_to_install.fix_serialize_size;
             installable.repak = mod_to_install.to_repak;
@@ -1615,7 +1610,6 @@ async fn install_mods(
             
             for (idx, imod) in installable_mods.iter().enumerate() {
                 window_for_logs.emit("install_log", format!("[{}/{}] Mod: {}", idx + 1, installable_mods.len(), imod.mod_name)).ok();
-                window_for_logs.emit("install_log", format!("  - Fix Mesh: {}", imod.fix_mesh)).ok();
                 window_for_logs.emit("install_log", format!("  - Fix Textures: {}", imod.fix_textures)).ok();
                 window_for_logs.emit("install_log", format!("  - Fix SerializeSize: {}", imod.fix_serialsize_header)).ok();
                 window_for_logs.emit("install_log", format!("  - Repak: {}", imod.repak)).ok();
@@ -1683,30 +1677,78 @@ async fn install_mods(
 #[tauri::command]
 async fn delete_mod(path: String, window: Window) -> Result<(), String> {
     let path_buf = PathBuf::from(&path);
+    log::info!("delete_mod called with path: {}", path);
+    
+    // Determine the actual file to delete - check both .pak and .bak_repak variants
+    let (actual_path, is_disabled) = if path_buf.exists() {
+        (path_buf.clone(), path.ends_with(".bak_repak"))
+    } else if path.ends_with(".pak") {
+        // The .pak file doesn't exist, check if there's a disabled version (.bak_repak)
+        let disabled_path = PathBuf::from(format!("{}.bak_repak", path.trim_end_matches(".pak")));
+        if disabled_path.exists() {
+            log::info!("Found disabled mod at: {:?}", disabled_path);
+            (disabled_path, true)
+        } else {
+            (path_buf.clone(), false)
+        }
+    } else if path.ends_with(".bak_repak") {
+        // The .bak_repak doesn't exist, check if there's an enabled version (.pak)
+        let enabled_path = PathBuf::from(format!("{}.pak", path.trim_end_matches(".pak.bak_repak")));
+        if enabled_path.exists() {
+            log::info!("Found enabled mod at: {:?}", enabled_path);
+            (enabled_path, false)
+        } else {
+            (path_buf.clone(), true)
+        }
+    } else {
+        (path_buf.clone(), false)
+    };
+    
+    log::info!("Attempting to delete: {:?} (is_disabled: {})", actual_path, is_disabled);
     
     // Try to delete the main file
-    if path_buf.exists() {
-        if let Err(e) = std::fs::remove_file(&path_buf) {
+    if actual_path.exists() {
+        if let Err(e) = std::fs::remove_file(&actual_path) {
             let error_msg = format!("Failed to delete mod file: {}", e);
             toast_events::emit_delete_failed(&window, &error_msg);
             return Err(error_msg);
         }
+        log::info!("Deleted main mod file: {:?}", actual_path);
+    } else {
+        log::warn!("Main mod file does not exist: {:?}", actual_path);
     }
 
-    // If it's a .pak file, try to delete associated IOStore files
-    if let Some(extension) = path_buf.extension() {
-        if extension.to_string_lossy().to_lowercase() == "pak" {
-            // We need to handle the case where the file name might have multiple dots, 
-            // but with_extension replaces the last one, which is what we want for .pak -> .ucas
-            let ucas_path = path_buf.with_extension("ucas");
-            if ucas_path.exists() {
-                let _ = std::fs::remove_file(ucas_path);
-            }
-            
-            let utoc_path = path_buf.with_extension("utoc");
-            if utoc_path.exists() {
-                let _ = std::fs::remove_file(utoc_path);
-            }
+    // Determine the base path for IoStore files (always based on .pak name, not .bak_repak)
+    let base_pak_path = if is_disabled || path.ends_with(".bak_repak") {
+        // For disabled mods, derive the .pak base path
+        let path_str = if actual_path.to_string_lossy().ends_with(".bak_repak") {
+            actual_path.to_string_lossy().trim_end_matches(".bak_repak").to_string()
+        } else {
+            path.trim_end_matches(".pak.bak_repak").to_string()
+        };
+        PathBuf::from(format!("{}.pak", path_str))
+    } else {
+        actual_path.clone()
+    };
+    
+    log::info!("Base path for IoStore files: {:?}", base_pak_path);
+    
+    // Delete associated IoStore files (.ucas and .utoc)
+    let ucas_path = base_pak_path.with_extension("ucas");
+    if ucas_path.exists() {
+        if let Err(e) = std::fs::remove_file(&ucas_path) {
+            log::warn!("Failed to delete .ucas file: {}", e);
+        } else {
+            log::info!("Deleted associated .ucas file: {:?}", ucas_path);
+        }
+    }
+    
+    let utoc_path = base_pak_path.with_extension("utoc");
+    if utoc_path.exists() {
+        if let Err(e) = std::fs::remove_file(&utoc_path) {
+            log::warn!("Failed to delete .utoc file: {}", e);
+        } else {
+            log::info!("Deleted associated .utoc file: {:?}", utoc_path);
         }
     }
     
@@ -1781,12 +1823,14 @@ async fn copy_to_clipboard(text: String, window: Window) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         use std::process::{Command, Stdio};
+        use std::os::windows::process::CommandExt;
         
         let mut child = Command::new("powershell")
             .args(["-Command", "Set-Clipboard", "-Value", &format!("'{}'", text.replace("'", "''"))])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW - prevents PowerShell window from showing
             .spawn()
             .map_err(|e| format!("Failed to copy to clipboard: {}", e))?;
         
@@ -2681,11 +2725,15 @@ async fn extract_mod_assets(mod_path: String, dest_path: String) -> Result<usize
     match extension.as_str() {
         "utoc" => {
             // IoStore extraction using UAssetTool
+            log::info!("Starting IoStore extraction from {:?} to {:?}", path, output_dir);
             let file_count = uasset_toolkit::extract_iostore(
                 &path.to_string_lossy(),
                 &output_dir.to_string_lossy(),
                 None, // Use default AES key
-            ).map_err(|e| format!("Failed to extract IoStore: {}", e))?;
+            ).map_err(|e| {
+                log::error!("IoStore extraction failed: {}", e);
+                format!("Failed to extract IoStore: {}", e)
+            })?;
             
             log::info!("Extracted {} files from IoStore to {:?}", file_count, output_dir);
             
@@ -3671,7 +3719,7 @@ async fn monitor_game_for_crashes(
                     // Check if it's a mesh-related crash
                     if crash_monitor::is_mesh_related_crash(error_msg) {
                         error!("⚠️   ⚡ MESH LOADING ERROR - Likely caused by incorrect SerializeSize");
-                        error!("⚠️   💡 Tip: Re-run UAssetGUI on this mod or disable 'Fix Mesh' option");
+                        error!("⚠️   💡 Tip: Re-run UAssetGUI on this mod to fix SerializeSize issues");
                     }
                     
                     if let Some(seconds) = info.seconds_since_start {
@@ -4824,6 +4872,33 @@ fn main() {
                 let payload = event.payload();
                 info!("Received deep link URL: {}", payload);
                 handle_deep_link_url(payload, &app_handle);
+            });
+            
+            // ============================================================
+            // COLD START DEEP LINK HANDLING
+            // ============================================================
+            // When the app is launched via repakx:// protocol (not already running),
+            // the URL is passed as a command-line argument, not as an event.
+            // We need to check for it here and emit the event to the frontend.
+            // 
+            // Note: We use a small delay to ensure the frontend is ready to receive events.
+            // ============================================================
+            let startup_app_handle = app.handle().clone();
+            std::thread::spawn(move || {
+                // Wait for the frontend to be ready
+                std::thread::sleep(std::time::Duration::from_millis(1000));
+                
+                // Check command-line arguments for repakx:// URL
+                let args: Vec<String> = std::env::args().collect();
+                info!("Startup command-line args: {:?}", args);
+                
+                for arg in args.iter().skip(1) { // Skip the exe path itself
+                    if arg.starts_with("repakx://") {
+                        info!("Found cold-start deep link URL: {}", arg);
+                        handle_deep_link_url(arg, &startup_app_handle);
+                        break; // Only process the first repakx:// URL
+                    }
+                }
             });
             
             Ok(())

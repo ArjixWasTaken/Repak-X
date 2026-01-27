@@ -1,4 +1,3 @@
-use crate::install_mod::install_mod_logic::patch_meshes::mesh_patch_with_source;
 use crate::install_mod::{InstallableMod, AES_KEY};
 use crate::utils::collect_files;
 use log::{debug, info, error};
@@ -111,11 +110,7 @@ pub fn repak_dir(
     let mut paths = vec![];
     collect_files(&mut paths, &to_pak_dir)?;
 
-    // Pass source mod path to check for existing patched_files marker (prevents double-patching)
-    if pak.fix_mesh {
-        let source_mod_path = if pak.is_dir { Some(&pak.mod_path) } else { None };
-        mesh_patch_with_source(&mut paths, &to_pak_dir.to_path_buf(), source_mod_path)?;
-    }
+    // Note: Mesh patching is now handled automatically by UAssetTool during IoStore conversion
 
     // Process textures and track which ones had mipmaps removed
     let processed_textures = if pak.fix_textures {

@@ -1,7 +1,7 @@
 pub mod install_mod_logic;
 
 use crate::install_mod::install_mod_logic::archives::{extract_zip, extract_rar, extract_7z};
-use crate::uasset_detection::{detect_mesh_files, detect_texture_files, detect_static_mesh_files};
+use crate::uasset_detection::{detect_texture_files, detect_static_mesh_files};
 use crate::utils::{collect_files, get_current_pak_characteristics};
 use crate::utoc_utils::read_utoc;
 use log::{debug, error};
@@ -23,7 +23,6 @@ pub struct InstallableMod {
     pub custom_tags: Vec<String>,
     pub custom_tag_input: String,
     pub repak: bool,
-    pub fix_mesh: bool,
     pub fix_textures: bool,
     pub fix_serialsize_header: bool,
     pub usmap_path: String,
@@ -43,7 +42,7 @@ pub struct InstallableMod {
     pub enabled: bool,
     // pub audio_mod: bool,
     /// Whether the mod contains any .uasset/.uexp/.ubulk/.umap files
-    /// Used by frontend to lock/unlock certain toggles (e.g., fix mesh/texture only applies to uasset mods)
+    /// Used by frontend to lock/unlock certain toggles (e.g., fix texture only applies to uasset mods)
     pub contains_uassets: bool,
     /// Force legacy PAK format instead of IoStore conversion
     /// Used for Audio/Config mods that don't need IoStore processing
@@ -60,7 +59,6 @@ impl Default for InstallableMod {
             custom_tags: Vec::new(),
             custom_tag_input: String::new(),
             repak: false,
-            fix_mesh: false,
             fix_textures: false,
             fix_serialsize_header: false,
             usmap_path: String::new(),
@@ -144,7 +142,6 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         mod_name: mod_base_name,
                         mod_type: modtype.to_string(),
                         repak: false,  // Don't use repak workflow for iostore mods
-                        fix_mesh: false,
                         is_dir: false,
                         reader: Some(builder),
                         mod_path: file_path.to_path_buf(),
@@ -177,8 +174,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     // Check if this is an Audio or Movies mod (these should skip repak workflow)
                     let is_audio_or_movie = modtype.contains("Audio") || modtype.contains("Movies");
                     
-                    // Auto-detect mesh and texture files
-                    let auto_fix_mesh = detect_mesh_files(&files);
+                    // Auto-detect texture files (mesh patching is handled automatically by UAssetTool)
                     let auto_fix_textures = detect_texture_files(&files);
                     let auto_fix_static_mesh = detect_static_mesh_files(&files);
 
@@ -186,7 +182,6 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         mod_name: mod_base_name,
                         mod_type: modtype.to_string(),
                         repak: !is_audio_or_movie,  // Only use repak if NOT Audio/Movies
-                        fix_mesh: auto_fix_mesh,
                         fix_textures: auto_fix_textures,
                         fix_serialsize_header: auto_fix_static_mesh,
                         is_dir: false,
@@ -257,8 +252,7 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         let has_uassets = contains_uasset_files(&file_strings);
                         let is_audio_or_movies = modtype.contains("Audio") || modtype.contains("Movies");
                         
-                        // Auto-detect mesh and texture files
-                        let auto_fix_mesh = detect_mesh_files(&file_strings);
+                        // Auto-detect texture files (mesh patching is handled automatically by UAssetTool)
                         let auto_fix_textures = detect_texture_files(&file_strings);
                         let auto_fix_static_mesh = detect_static_mesh_files(&file_strings);
                         
@@ -266,7 +260,6 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                             mod_name,
                             mod_type: modtype.to_string(),
                             repak: !is_audio_or_movies,  // Will go through convert_to_iostore_directory
-                            fix_mesh: auto_fix_mesh,
                             fix_textures: auto_fix_textures,
                             fix_serialsize_header: auto_fix_static_mesh,
                             is_dir: true,  // Mark as directory so it uses convert_to_iostore_directory
@@ -317,7 +310,6 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                     let modtype = get_current_pak_characteristics(file_strings.clone());
                     let has_uassets = contains_uasset_files(&file_strings);
                     let is_audio_or_movies = modtype.contains("Audio") || modtype.contains("Movies");
-                    let auto_fix_mesh = detect_mesh_files(&file_strings);
                     let auto_fix_textures = detect_texture_files(&file_strings);
                     let auto_fix_static_mesh = detect_static_mesh_files(&file_strings);
                     
@@ -325,7 +317,6 @@ fn find_mods_from_archive(path: &str) -> Vec<InstallableMod> {
                         mod_name,
                         mod_type: modtype.to_string(),
                         repak: !is_audio_or_movies,
-                        fix_mesh: auto_fix_mesh,
                         fix_textures: auto_fix_textures,
                         fix_serialsize_header: auto_fix_static_mesh,
                         is_dir: true,
@@ -372,7 +363,6 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
             let mut modtype = "Unknown".to_string();
             let mut pak = None;
             let mut len = 1;
-            let mut auto_fix_mesh = false;
             let mut auto_fix_textures = false;
             let mut auto_fix_static_mesh = false;
             let mut has_uassets = true; // Default to true for safety
@@ -402,8 +392,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                         
                         // IoStore packages should not have auto-fixes enabled
                         if !is_iostore {
-                            // Auto-detect mesh and texture files in pak files
-                            auto_fix_mesh = detect_mesh_files(&files);
+                            // Auto-detect texture files (mesh patching is handled automatically by UAssetTool)
                             auto_fix_textures = detect_texture_files(&files);
                             auto_fix_static_mesh = detect_static_mesh_files(&files);
                         }
@@ -426,8 +415,7 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 modtype = get_current_pak_characteristics(files.clone());
                 has_uassets = contains_uasset_files(&files);
                 
-                // Auto-detect mesh and texture files
-                auto_fix_mesh = detect_mesh_files(&files);
+                // Auto-detect texture files (mesh patching is handled automatically by UAssetTool)
                 auto_fix_textures = detect_texture_files(&files);
                 auto_fix_static_mesh = detect_static_mesh_files(&files);
             }
@@ -464,7 +452,6 @@ fn map_to_mods_internal(paths: &[PathBuf]) -> Vec<InstallableMod> {
                 mod_name: path.file_stem().unwrap().to_str().unwrap().to_string(),
                 mod_type: modtype,
                 repak: should_repak,
-                fix_mesh: auto_fix_mesh,
                 fix_textures: auto_fix_textures,
                 fix_serialsize_header: auto_fix_static_mesh,
                 is_dir,

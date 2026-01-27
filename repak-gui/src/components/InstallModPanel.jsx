@@ -99,7 +99,7 @@ const FolderNode = ({ node, selectedFolderId, onSelect, depth = 0 }) => {
 
 const hasCookedAssets = (mod = {}) => {
   if (!mod?.is_dir) return false
-  return Boolean(mod.auto_fix_mesh || mod.auto_fix_texture || mod.auto_fix_serialize_size)
+  return Boolean(mod.auto_fix_texture || mod.auto_fix_serialize_size)
 }
 
 const isRepakLocked = (mod = {}) => mod.is_dir || hasCookedAssets(mod)
@@ -114,7 +114,6 @@ const buildInitialSettings = (mods = []) => {
     const effectiveToRepak = !canApplyPatches ? false : (locked ? false : defaultToRepak)
 
     acc[idx] = {
-      fixMesh: canApplyPatches ? (mod.auto_fix_mesh || false) : false,
       fixTexture: canApplyPatches ? (mod.auto_fix_texture || false) : false,
       fixSerializeSize: canApplyPatches ? (mod.auto_fix_serialize_size || false) : false,
       toRepak: effectiveToRepak,
@@ -190,7 +189,6 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
         [idx]: {
           ...prev[idx],
           [key]: value,
-          fixMesh: false,
           fixTexture: false,
           fixSerializeSize: false
         }
@@ -199,7 +197,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
     }
 
     // Prevent enabling patch toggles when in legacy mode or no uassets
-    if (['fixMesh', 'fixTexture', 'fixSerializeSize'].includes(key)) {
+    if (['fixTexture', 'fixSerializeSize'].includes(key)) {
       if (modSettings[idx]?.forceLegacy || mods[idx]?.contains_uassets === false) {
         return
       }
@@ -277,11 +275,6 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                 const { character, category, additional } = parseModType(mod.mod_type)
                 const modLabel = mod.is_dir ? 'Folder Drop' : 'PAK File'
                 const toggleDefinitions = [
-                  {
-                    key: 'fixMesh',
-                    label: 'Patch Skeletal Meshes',
-                    hint: 'Applies fixes to skeletal meshes'
-                  },
                   {
                     key: 'fixTexture',
                     label: 'Patch Textures',

@@ -47,7 +47,6 @@ rayon = "1.10.0"
 byteorder = "1.5"
 
 # UAsset handling
-uasset-mesh-patch-rivals = {path = "../uasset-mesh-patch-rivals"}
 uasset_toolkit = { path = "../uasset_toolkit/uasset_app", package = "uasset_app" }
 
 # Utilities

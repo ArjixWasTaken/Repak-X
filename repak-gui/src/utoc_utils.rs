@@ -27,14 +27,45 @@ pub fn try_read_utoc(utoc_path: &Path) -> Result<Vec<UtocFileEntry>, String> {
         None, // Use default AES key
     ).map_err(|e| format!("Failed to read utoc: {}", e))?;
     
-    // Convert to UtocFileEntry format
+    // Convert to UtocFileEntry format, normalizing paths to remove /../ patterns
     let entries = result.files.iter().map(|file_path| {
+        let normalized = normalize_iostore_path(file_path);
         UtocFileEntry {
-            file_path: file_path.clone(),
+            file_path: normalized,
             bulkdata_chunks: 0, // Not available from new API
             packagedata_chunks: 0, // Not available from new API
         }
     }).collect();
     
     Ok(entries)
+}
+
+/// Normalize IoStore paths to remove /../ patterns and convert to clean /Game/ paths
+fn normalize_iostore_path(path: &str) -> String {
+    let mut result = path.to_string();
+    
+    // Handle paths like "../../../Marvel_New/Content/Marvel/Characters/..."
+    // These should become "/Game/Marvel/Characters/..."
+    if result.contains("/../") {
+        // Split by / and resolve .. segments
+        let parts: Vec<&str> = result.split('/').collect();
+        let mut resolved: Vec<&str> = Vec::new();
+        
+        for part in parts {
+            if part == ".." {
+                resolved.pop();
+            } else if !part.is_empty() && part != "." {
+                resolved.push(part);
+            }
+        }
+        
+        result = format!("/{}", resolved.join("/"));
+        
+        // Convert /Marvel_New/Content/... or /Marvel/Content/... to /Game/...
+        if let Some(content_idx) = result.find("/Content/") {
+            result = format!("/Game{}", &result[content_idx + "/Content".len()..]);
+        }
+    }
+    
+    result
 }

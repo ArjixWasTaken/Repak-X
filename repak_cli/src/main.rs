@@ -4,10 +4,9 @@ use clap::{Parser, Subcommand};
 use path_clean::PathClean;
 use path_slash::PathExt;
 use rayon::prelude::*;
-use uasset_mesh_patch_rivals::{Logger, PatchFixer};
 use std::collections::BTreeMap;
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, BufRead, BufReader, BufWriter, ErrorKind, Write};
+use std::fs::{self, File};
+use std::io::{self, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use colored::Colorize;
 use strum::VariantNames;
@@ -114,14 +113,6 @@ struct ActionPack {
     /// Hides normal output such as progress bar and completion status
     #[arg(short, long, default_value = "false")]
     quiet: bool,
-
-    // Whether to patch mesh assets
-    #[arg(long, default_value = "false")]
-    patch_uasset: bool,
-
-    // Restore mesh assets
-    #[arg(long, default_value = "false")]
-    restore_assets: bool,
 }
 
 #[derive(Parser, Debug)]
@@ -139,21 +130,6 @@ struct ActionGet {
     strip_prefix: String,
 }
 
-#[derive(Parser, Debug)]
-struct ActionExtractIoStore {
-    /// Input .utoc path or directory containing IoStore bundles
-    #[arg(index = 1)]
-    input: String,
-
-    /// Output directory for extracted legacy assets
-    #[arg(index = 2)]
-    output: String,
-
-    /// Filter to specific package path (e.g., /Game/Marvel/...)
-    #[arg(short, long)]
-    package: Option<String>,
-}
-
 #[derive(Subcommand, Debug)]
 enum Action {
     /// Print .pak info
@@ -168,8 +144,6 @@ enum Action {
     Pack(ActionPack),
     /// Reads a single file to stdout
     Get(ActionGet),
-    /// Extract IoStore (.utoc/.ucas) to legacy .uasset/.uexp files
-    ExtractIoStore(ActionExtractIoStore),
 }
 
 #[derive(Parser, Debug)]
@@ -194,7 +168,6 @@ fn main() -> Result<(), repak::Error> {
         Action::Unpack(action) => unpack(aes_key, action),
         Action::Pack(action) => pack(aes_key, action),
         Action::Get(action) => get(aes_key, action),
-        Action::ExtractIoStore(action) => extract_iostore(action),
     }
 }
 
@@ -483,179 +456,6 @@ fn pack(aes_key: Option<aes::Aes256>, args: ActionPack) -> Result<(), repak::Err
     let mut paths = vec![];
     collect_files(&mut paths, input_path)?;
 
-    let uasset_files = paths
-        .iter()
-        .filter(|p| {
-            p.extension().and_then(|ext| ext.to_str()) == Some("uasset")
-                && (p.to_str().unwrap().to_lowercase().contains("meshes"))
-        })
-        .map(|p| p.clone())
-        .collect::<Vec<PathBuf>>();
-
-    let patched_cache_file = input_path.join("patched_files");
-    let file = OpenOptions::new()
-        .read(true) // Allow reading
-        .write(true) // Allow writing
-        .create(true) // Create the file if it doesn’t exist
-        .open(&patched_cache_file)?;
-
-    let patched_files = BufReader::new(&file)
-        .lines()
-        .map(|l| l.unwrap().clone())
-        .collect::<Vec<_>>();
-
-    let mut cache_writer = BufWriter::new(&file);
-
-    paths.push(patched_cache_file);
-
-    if args.restore_assets {
-        for uassetfile in &uasset_files {
-            let dir_path = uassetfile.parent().unwrap();
-            let uexp_file = dir_path.join(
-                uassetfile
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .replace(".uasset", ".uexp"),
-            );
-
-            println!("Restoring {:?} and {:?}", uassetfile, uexp_file);
-
-            fs::copy(
-                dir_path.join(format!(
-                    "{}.bak",
-                    uexp_file.file_name().unwrap().to_str().unwrap()
-                )),
-                &uexp_file,
-            )
-            .expect("Couldnt backup from .bak file, has this been repacked through repak?");
-            fs::copy(
-                dir_path.join(format!(
-                    "{}.bak",
-                    uassetfile.file_name().unwrap().to_str().unwrap()
-                )),
-                &uassetfile,
-            )
-            .expect("Couldnt backup from .bak file, has this been repacked through repak?");
-            File::create(input_path.join("patched_files"))?; // truncates the file
-        }
-    }
-    struct PrintLogger;
-    impl Logger for PrintLogger{
-        fn log<S: Into<String>>(&self,buf: S) {
-            let s = Into::<String>::into(buf);
-            println!("{}", s);
-        }
-    }
-
-    let print_logger = PrintLogger;
-    let mut fixer = PatchFixer{
-        logger: print_logger,
-    };
-
-    if args.patch_uasset {
-        'outer: for uassetfile in &uasset_files {
-            let mut sizes: Vec<i64> = vec![];
-            let mut offsets: Vec<i64> = vec![];
-
-            let dir_path = uassetfile.parent().unwrap();
-            let uexp_file = dir_path.join(
-                uassetfile
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .replace(".uasset", ".uexp"),
-            );
-
-            if !uexp_file.exists() {
-                panic!("UEXP file doesnt exist");
-                // damn
-            }
-
-            let rel_uasset = &uassetfile
-                .strip_prefix(input_path)
-                .expect("file not in input directory")
-                .to_slash()
-                .expect("failed to convert to slash path");
-
-            let rel_uexp = &uexp_file
-                .strip_prefix(input_path)
-                .expect("file not in input directory")
-                .to_slash()
-                .expect("failed to convert to slash path");
-
-            for i in &patched_files {
-                if i.as_str() == rel_uexp.to_string() || i.as_str() == rel_uasset.to_string() {
-                    println!("Skipping {} (File has already been patched before)", i.yellow());
-                    continue 'outer;
-                }
-            }
-
-            fs::copy(
-                &uexp_file,
-                dir_path.join(format!(
-                    "{}.bak",
-                    uexp_file.file_name().unwrap().to_str().unwrap()
-                )),
-            )?;
-            fs::copy(
-                &uassetfile,
-                dir_path.join(format!(
-                    "{}.bak",
-                    uassetfile.file_name().unwrap().to_str().unwrap()
-                )),
-            )?;
-
-            println!("Processing {}", &uassetfile.to_str().unwrap().yellow());
-            let mut rdr = BufReader::new(File::open(uassetfile.clone())?);
-            let (exp_cnt, exp_offset) = fixer.read_uasset(&mut rdr)?;
-            fixer.read_exports(&mut rdr, &mut sizes, &mut offsets, exp_offset, exp_cnt)?;
-
-            let backup_file = format!("{}.bak", uexp_file.to_str().unwrap());
-            let backup_file_size = fs::metadata(&uassetfile)?.len();
-            let tmpfile = format!("{}.temp", uexp_file.to_str().unwrap());
-
-            drop(rdr);
-
-
-            let mut r = BufReader::new(File::open(&backup_file)?);
-            let mut o = BufWriter::new(File::create(&tmpfile)?);
-
-            let exp_rd = fixer.read_uexp(&mut r,  backup_file_size,&*backup_file, &mut o, &offsets);
-            match exp_rd {
-                Ok(_) => {}
-                Err(e) => match e.kind() {
-                    ErrorKind::InvalidData => {
-                        panic!("{}", e.to_string())
-                    },
-                    ErrorKind::Other => {
-                        fs::remove_file(&tmpfile)?;
-                        continue 'outer;
-                    }
-                    _ => {
-                        panic!("{}", e.to_string())
-                    }
-                },
-            }
-            // fs::remove_file(&uexp_file)?;
-
-            fs::copy(&tmpfile, &uexp_file)?;
-            unsafe {
-                fixer.clean_uasset(uassetfile.clone(), &sizes)?;
-            }
-
-            writeln!(&mut cache_writer, "{}", &rel_uasset)?;
-            writeln!(&mut cache_writer, "{}", &rel_uexp)?;
-
-            fs::remove_file(&tmpfile)?;
-            cache_writer.flush()?;
-        }
-
-        println!("Done patching files!!");
-    }
-
     paths.sort();
 
     let mut builder = repak::PakBuilder::new().compression(args.compression.iter().cloned());
@@ -749,26 +549,3 @@ fn get(aes_key: Option<aes::Aes256>, args: ActionGet) -> Result<(), repak::Error
     Ok(())
 }
 
-fn extract_iostore(args: ActionExtractIoStore) -> Result<(), repak::Error> {
-    use std::sync::Arc;
-    
-    let input_path = PathBuf::from(&args.input);
-    let output_path = PathBuf::from(&args.output);
-    
-    // Create retoc config
-    let config = Arc::new(retoc::Config::default());
-    
-    println!("Extracting IoStore: {}", input_path.display());
-    println!("Output directory: {}", output_path.display());
-    
-    match retoc::extract_iostore(&input_path, &output_path, config) {
-        Ok(count) => {
-            println!("{} Extracted {} packages as legacy .uasset/.uexp files", "SUCCESS:".green(), count);
-            Ok(())
-        }
-        Err(e) => {
-            eprintln!("{} Failed to extract IoStore: {:#}", "ERROR:".red(), e);
-            Err(repak::Error::Other(format!("IoStore extraction failed: {}", e)))
-        }
-    }
-}

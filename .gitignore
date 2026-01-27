@@ -1,21 +1,46 @@
+# Build artifacts
 node_modules/
 target/
 dist/
 repak-gui/node_modules/
 repak-gui/target/
 repak-gui/dist/
+
+# IDE/Editor folders
 repak-gui/.agent/
 repak-gui/.agents/
 repak-gui/.windsurf/
+.vscode/
+.idea/
+
+# Documentation (generated)
 docs/
 
-# Ignored build artifacts (keep these)
-repak-gui/package-lock.json
-Cargo.lock
-
+# UAssetTool C# build artifacts (submodule has its own .gitignore)
+# These are legacy paths that may still exist
 UAssetAPI/UAssetAPI/bin/
 UAssetAPI/UAssetAPI/obj/
 UAssetAPI/StaticMeshSerializeSizeFixer/obj/
 UAssetAPI/StaticMeshSerializeSizeFixer/bin/
 uasset_toolkit/tools/UAssetBridge/bin/
 uasset_toolkit/tools/UAssetBridge/obj/
+uasset_toolkit/tools/UAssetTool/bin/
+uasset_toolkit/tools/UAssetTool/obj/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test output / extracted files
+ScriptObjectExportTest/
+*.usmap
+
+# Sensitive files
+*.env
+*.env.local
