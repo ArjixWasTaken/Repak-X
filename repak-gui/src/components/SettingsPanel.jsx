@@ -2,9 +2,12 @@ import React, { useState, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { AnimatedThemeToggler } from './ui/AnimatedThemeToggler'
+import Switch from './ui/Switch'
 import Checkbox from './ui/Checkbox'
 import { LuFolderInput } from "react-icons/lu"
-import { RiSparkling2Fill } from "react-icons/ri"
+import { RiSparkling2Fill, RiFlaskLine } from "react-icons/ri"
+import { MdRefresh } from "react-icons/md"
+import { FaDiscord } from "react-icons/fa"
 import './SettingsPanel.css'
 import { useAlert } from './AlertHandler'
 
@@ -18,8 +21,7 @@ const ACCENT_COLORS = {
 };
 
 
-
-export default function SettingsPanel({ settings, onSave, onClose, theme, setTheme, accentColor, setAccentColor, gamePath, onAutoDetectGamePath, onBrowseGamePath, isGamePathLoading }) {
+export default function SettingsPanel({ settings, onSave, onClose, theme, setTheme, accentColor, setAccentColor, gamePath, onAutoDetectGamePath, onBrowseGamePath, isGamePathLoading, onCheckForUpdates, isCheckingUpdates }) {
   const alert = useAlert();
   const [globalUsmap, setGlobalUsmap] = useState(settings.globalUsmap || '');
   const [hideSuffix, setHideSuffix] = useState(settings.hideSuffix || false);
@@ -28,6 +30,10 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
   const [showHeroBg, setShowHeroBg] = useState(settings.showHeroBg || false);
   const [showModType, setShowModType] = useState(settings.showModType || false);
   const [showExperimental, setShowExperimental] = useState(settings.showExperimental || false);
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState(settings.autoCheckUpdates || false);
+  const [parallelProcessing, setLocalParallelProcessing] = useState(settings.parallelProcessing || false);
+  const [enableDrp, setEnableDrp] = useState(settings.enableDrp !== false); // Default true if undefined, or check requirements? Actually default false usually safer, but user eager. Let's stick to explicit default or false. Code says "settings.enableDrp || false" usually.
+  // Wait, usually I do settings.enableDrp || false.
   const [usmapStatus, setUsmapStatus] = useState('');
   const [showRatMode, setShowRatMode] = useState(false);
 
@@ -58,7 +64,10 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
       showHeroIcons,
       showHeroBg,
       showModType,
-      showExperimental
+      showExperimental,
+      autoCheckUpdates,
+      parallelProcessing,
+      enableDrp
     });
     alert.success('Settings Saved', 'Your preferences have been updated.');
     onClose();
@@ -69,7 +78,10 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
     if (settings.globalUsmap) {
       setGlobalUsmap(settings.globalUsmap);
     }
-  }, [settings.globalUsmap]);
+    if (settings.enableDrp !== undefined) {
+      setEnableDrp(settings.enableDrp);
+    }
+  }, [settings.globalUsmap, settings.enableDrp]);
 
   const handleBrowseUsmap = async () => {
     try {
@@ -172,6 +184,32 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
           </div>
 
           <div className="setting-section">
+            <h3>Updates</h3>
+            <div className="setting-group">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
+                <button
+                  onClick={onCheckForUpdates}
+                  disabled={isCheckingUpdates}
+                  className="action-btn"
+                  title="Check for updates now"
+                  style={{ minWidth: '140px' }}
+                >
+                  <MdRefresh className={isCheckingUpdates ? 'spin-icon' : ''} />
+                  {isCheckingUpdates ? 'Checking...' : 'Check Now'}
+                </button>
+                <span style={{ fontSize: '0.8rem', opacity: 0.6 }}>Current Version: v{typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0'}</span>
+              </div>
+
+              <Checkbox
+                checked={autoCheckUpdates}
+                onChange={(checked) => setAutoCheckUpdates(checked)}
+              >
+                <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Auto-check for updates on startup</span>
+              </Checkbox>
+            </div>
+          </div>
+
+          <div className="setting-section">
             <h3>Mods View Settings</h3>
             <div className="setting-group">
               <Checkbox
@@ -224,6 +262,44 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
           </div>
 
           <div className="setting-section">
+            <h3>Experimental</h3>
+            <div className="setting-group">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <RiFlaskLine style={{ marginRight: '8px', color: '#ff9800' }} />
+                  <span style={{ fontWeight: 'normal', opacity: 0.9 }}>Enable Parallel Processing</span>
+                </div>
+                <Switch
+                  checked={parallelProcessing}
+                  onChange={(checked) => setLocalParallelProcessing(checked)}
+                />
+              </div>
+              <p style={{ fontSize: '0.8rem', opacity: 0.6, marginLeft: '24px' }}>
+                Enables concurrent processing for backend operations.
+              </p>
+            </div>
+          </div>
+
+          <div className="setting-section">
+            <h3>Integrations</h3>
+            <div className="setting-group">
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center' }}>
+                  <FaDiscord style={{ color: '#5865F2', marginRight: '8px' }} />
+                  <span style={{ fontWeight: 'normal', opacity: 0.9 }}>Enable Discord Rich Presence</span>
+                </div>
+                <Switch
+                  checked={enableDrp}
+                  onChange={(checked) => setEnableDrp(checked)}
+                />
+              </div>
+              <p style={{ fontSize: '0.8rem', opacity: 0.6, marginLeft: '24px' }}>
+                Show your active modding status on Discord.
+              </p>
+            </div>
+          </div>
+
+          <div className="setting-section">
             <h3>Theme</h3>
             <div className="setting-group">
               <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '1rem' }}>
@@ -250,7 +326,7 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
 
         </div>
 
-        <div className="modal-footer" style={{ gap: '0.5rem' }}>
+        <div className="modal-footer">
           <button
             onClick={onClose}
             className="btn-secondary"

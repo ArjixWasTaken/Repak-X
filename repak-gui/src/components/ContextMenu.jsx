@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
+import { open } from '@tauri-apps/plugin-dialog'
 import { IoMdWarning } from "react-icons/io"
 import './ContextMenu.css'
 
-const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCreateFolder, folders, onDelete, onToggle, onRename, onCheckConflicts, allTags, gamePath }) => {
+const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCreateFolder, folders, onDelete, onToggle, onRename, onCheckConflicts, onUpdateMod, allTags, gamePath }) => {
   const [isDeleting, setIsDeleting] = useState(false)
   const deleteTimeoutRef = useRef(null)
   const menuRef = useRef(null)
@@ -179,6 +180,10 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
         Check Conflicts <IoMdWarning className="warning-icon-small" style={{ fill: 'var(--accent-primary)' }} />
       </div>
 
+      <div className="context-menu-item" onClick={() => { if (onUpdateMod) onUpdateMod(); onClose(); }}>
+        Update/Replace
+      </div>
+
       <div className="context-menu-separator" />
 
       <div className="context-menu-item" onClick={() => { onToggle(); onClose(); }}>
@@ -204,7 +209,6 @@ const ContextMenu = ({ x, y, mod, folder, onClose, onAssignTag, onMoveTo, onCrea
       <div className="context-menu-item" onClick={async () => {
         try {
           // Open folder picker dialog
-          const { open } = await import('@tauri-apps/plugin-dialog');
           const destFolder = await open({
             directory: true,
             multiple: false,

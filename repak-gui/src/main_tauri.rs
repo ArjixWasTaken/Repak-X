@@ -71,6 +71,10 @@ struct AppState {
     /// Last known crash folder name for detecting crashes from previous sessions
     #[serde(default)]
     last_known_crash_folder: Option<String>,
+    #[serde(default)]
+    enable_drp: bool,
+    #[serde(default)]
+    accent_color: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -133,6 +137,70 @@ struct ModEntry {
 // ============================================================================
 // TAURI COMMANDS
 // ============================================================================
+
+#[derive(Serialize, Deserialize)]
+struct DrpSettingsDto {
+    #[serde(default)]
+    enable_drp: Option<bool>,
+    #[serde(default)]
+    accent_color: Option<String>,
+}
+
+#[tauri::command]
+async fn get_drp_settings(state: State<'_, Arc<Mutex<AppState>>>) -> Result<DrpSettingsDto, String> {
+    let state = state.lock().unwrap();
+    Ok(DrpSettingsDto {
+        enable_drp: Some(state.enable_drp),
+        accent_color: state.accent_color.clone(),
+    })
+}
+
+#[tauri::command]
+async fn save_drp_settings(
+    settings: DrpSettingsDto, 
+    state: State<'_, Arc<Mutex<AppState>>>,
+    discord: State<'_, DiscordState>
+) -> Result<(), String> {
+    let mut state = state.lock().unwrap();
+    
+    // Handle DRP Settings
+    if let Some(enabled) = settings.enable_drp {
+        state.enable_drp = enabled;
+        
+        // Apply immediately
+        if enabled {
+             if !discord.manager.is_connected() {
+                 let _ = discord.manager.connect();
+             }
+        } else {
+             if discord.manager.is_connected() {
+                 let _ = discord.manager.disconnect();
+             }
+        }
+    }
+    
+    if let Some(color) = settings.accent_color {
+        state.accent_color = Some(color.clone());
+        // Also update theme if DRP is connected
+        if discord.manager.is_connected() {
+             let theme_name = match color.as_str() {
+                  "#be1c1c" => "red",
+                  "#4a9eff" => "blue",
+                  "#9c27b0" => "purple",
+                  "#4CAF50" => "green",
+                  "#ff9800" => "orange",
+                  "#FF96BC" => "pink",
+                  _ => "default"
+              };
+              discord.manager.set_theme(theme_name);
+              // Force activity refresh with new logo
+              let _ = discord.manager.set_idle();
+        }
+    }
+    
+    save_state(&state).map_err(|e| e.to_string())?;
+    Ok(())
+}
 
 #[tauri::command]
 async fn get_game_path(state: State<'_, Arc<Mutex<AppState>>>) -> Result<String, String> {
@@ -5485,15 +5553,33 @@ fn main() {
     
     // Initialize Discord Rich Presence manager
     let discord_manager = discord_presence::create_discord_manager();
-    
-    // Auto-connect to Discord on startup
-    if let Err(e) = discord_manager.connect() {
-        warn!("Failed to connect to Discord Rich Presence: {} - Discord may not be running", e);
-    } else {
-        info!("Connected to Discord Rich Presence");
-        // Set initial activity
-        if let Err(e) = discord_manager.set_idle() {
-            warn!("Failed to set initial Discord activity: {}", e);
+
+    // Check saved state to see if DRP should be enabled
+    {
+        let state_guard = state.lock().unwrap();
+        if state_guard.enable_drp {
+             if let Err(e) = discord_manager.connect() {
+                 warn!("Failed to auto-connect Discord RPC: {}", e);
+             } else {
+                 info!("Auto-connected Discord RPC from saved settings");
+                 
+                 // Apply saved theme if available
+                 if let Some(accent) = &state_guard.accent_color {
+                      let theme_name = match accent.as_str() {
+                          "#be1c1c" => "red",
+                          "#4a9eff" => "blue",
+                          "#9c27b0" => "purple",
+                          "#4CAF50" => "green",
+                          "#ff9800" => "orange",
+                          "#FF96BC" => "pink",
+                          _ => "default"
+                      };
+                      discord_manager.set_theme(theme_name);
+                 }
+                 
+                 // Set initial activity
+                 let _ = discord_manager.set_idle();
+             }
         }
     }
     
@@ -5671,8 +5757,21 @@ fn main() {
             discord_set_receiving,
             discord_clear_activity,
             discord_set_theme,
-            discord_get_theme
+            discord_get_theme,
+            // App Settings
+            get_drp_settings,
+            save_drp_settings
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                // Ensure Discord RPC is disconnected on exit
+                let discord_state = app_handle.state::<DiscordState>();
+                if discord_state.manager.is_connected() {
+                    info!("App exiting, disconnecting Discord RPC...");
+                    let _ = discord_state.manager.disconnect();
+                }
+            }
+        });
 }

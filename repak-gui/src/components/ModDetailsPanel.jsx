@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { Tooltip } from '@mui/material'
-import { FaTag } from "react-icons/fa6"
+import { FaTag, FaExchangeAlt } from "react-icons/fa"
 import FileTree from './FileTree'
 import { formatFileSize } from '../utils/format'
 import { detectHeroesWithData } from '../utils/heroes'
@@ -9,7 +9,7 @@ import './ModDetailsPanel.css'
 
 const heroImages = import.meta.glob('../assets/hero/*.png', { eager: true })
 
-export default function ModDetailsPanel({ mod, initialDetails, onClose, characterData = [] }) {
+export default function ModDetailsPanel({ mod, initialDetails, onClose, characterData = [], onUpdateMod }) {
   const [details, setDetails] = useState(initialDetails || null)
   const [loading, setLoading] = useState(!initialDetails)
   const [error, setError] = useState(null)
@@ -112,6 +112,16 @@ export default function ModDetailsPanel({ mod, initialDetails, onClose, characte
     <div className="details-panel">
       <div className="details-header">
         <h2>{cleanName}</h2>
+        {onUpdateMod && (
+          <button
+            className="header-action-btn"
+            onClick={onUpdateMod}
+            title="Update/Replace Mod File"
+            style={{ marginLeft: 'auto' }}
+          >
+            <FaExchangeAlt /> Update
+          </button>
+        )}
       </div>
 
       <div className="details-body">

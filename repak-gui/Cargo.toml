@@ -100,7 +100,7 @@ once_cell = "1.19"
 chrono = "0.4"
 
 # Discord Rich Presence
-discord-rich-presence = "0.2"
+discord-rich-presence = "1.1.0"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

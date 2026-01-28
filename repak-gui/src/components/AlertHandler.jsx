@@ -319,7 +319,7 @@ const ToastItem = memo(function ToastItem({ toast, onDismiss, index, total, isHo
     const elapsedTimeRef = useRef(0); // Track total elapsed time across pauses
     const lastStartTimeRef = useRef(Date.now()); // Track when current interval started
 
-    const { id, title, description, color, variant, icon, hideIcon, duration, endContent, action, isLoading } = toast;
+    const { id, title, description, color, variant, icon, hideIcon, duration, endContent, action, isLoading, progressValue } = toast;
 
     // Only the front toast (index 0) should auto-dismiss
     const shouldAutoDismiss = index === 0;
@@ -469,12 +469,12 @@ const ToastItem = memo(function ToastItem({ toast, onDismiss, index, total, isHo
                 </svg>
             </button>
 
-            {/* Progress bar - only on front toast */}
-            {shouldAutoDismiss && duration > 0 && (
+            {/* Progress bar - either auto-dismiss or manual progress */}
+            {((shouldAutoDismiss && duration > 0) || typeof progressValue === 'number') && (
                 <div className="toast-progress-track">
                     <div
                         className="toast-progress-bar"
-                        style={{ transform: `scaleX(${progress / 100})` }}
+                        style={{ transform: `scaleX(${(typeof progressValue === 'number' ? progressValue : progress) / 100})` }}
                     />
                 </div>
             )}

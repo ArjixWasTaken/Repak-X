@@ -37,7 +37,7 @@ import DropZoneOverlay from './components/DropZoneOverlay'
 import ExtensionModOverlay from './components/ExtensionModOverlay'
 import QuickOrganizeOverlay from './components/QuickOrganizeOverlay'
 import InputPromptModal from './components/InputPromptModal'
-
+import UpdateModModal from './components/UpdateModModal'
 import { AuroraText } from './components/ui/AuroraText'
 import { AlertProvider, useAlert } from './components/AlertHandler'
 import { useGlobalTooltips } from './hooks/useGlobalTooltips'
@@ -60,6 +60,15 @@ import { detectHeroes } from './utils/heroes'
 import { formatFileSize, normalizeModBaseName } from './utils/format'
 import { getAdditionalCategories } from './utils/mods'
 
+const ACCENT_COLORS_MAP = {
+  red: '#be1c1c',
+  blue: '#4a9eff',
+  purple: '#9c27b0',
+  green: '#4CAF50',
+  orange: '#ff9800',
+  pink: '#FF96BC'
+};
+
 import TitleBar from './components/TitleBar'
 
 // Lazy load heavy panels
@@ -78,7 +87,10 @@ function App() {
   const [showHeroBg, setShowHeroBg] = useState(false);
   const [showModType, setShowModType] = useState(false);
   const [showExperimental, setShowExperimental] = useState(false);
-
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState(false);
+  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
+  const [enableDrp, setEnableDrp] = useState(false);
+  const [parallelProcessing, setParallelProcessing] = useState(false);
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
 
@@ -158,6 +170,14 @@ function App() {
   const [extensionModPath, setExtensionModPath] = useState(null) // Path of mod received from browser extension
   const [quickOrganizePaths, setQuickOrganizePaths] = useState(null) // Paths of PAKs to quick-organize (no uassets)
   const [newFolderPrompt, setNewFolderPrompt] = useState(null) // {paths: []} when prompting for new folder name
+
+  // Update Mod State
+  const [updateModState, setUpdateModState] = useState({
+    isOpen: false,
+    mod: null,
+    newSourcePath: null
+  })
+
   const dropTargetFolderRef = useRef(null)
   const searchInputRef = useRef(null)
   const modsGridRef = useRef(null)
@@ -253,6 +273,22 @@ function App() {
     }
   }
 
+  const handleSetParallelProcessing = async (enabled) => {
+    try {
+      // Optimistically update UI
+      setParallelProcessing(enabled);
+
+      // Try to call backend
+      await invoke('set_parallel_processing', { enabled });
+
+      setStatus(`Parallel processing ${enabled ? 'enabled' : 'disabled'}`);
+    } catch (error) {
+      console.warn('Backend command for parallel processing failed (expected):', error);
+      // We don't revert state here because this is a placeholder feature on frontend
+      // and backend might not exist yet. We keep the UI toggle working.
+    }
+  };
+
   const handleModSelect = (mod) => {
     setSelectedMod(mod)
     if (autoOpenDetails && !isRightPanelOpen) {
@@ -345,6 +381,76 @@ function App() {
     e.stopPropagation()
     setIsDeletingBulk(false)
     if (deleteBulkTimeoutRef.current) clearTimeout(deleteBulkTimeoutRef.current)
+  }
+
+  // Update Mod Handlers
+  const handleInitiateUpdate = async (mod) => {
+    if (!mod) return
+
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const selected = await open({
+        multiple: false,
+        filters: [{
+          name: 'Mod Files',
+          extensions: ['pak', 'zip', 'rar', '7z']
+        }]
+      })
+
+      if (selected) {
+        setUpdateModState({
+          isOpen: true,
+          mod: mod,
+          newSourcePath: selected
+        })
+      }
+    } catch (e) {
+      console.error('Failed to select update file:', e)
+      alert.error('Selection Failed', 'Could not open file picker')
+    }
+  }
+
+  const handleConfirmUpdate = async (preserveName) => {
+    const { mod, newSourcePath } = updateModState
+    if (!mod || !newSourcePath) return
+
+    // Close modal first
+    setUpdateModState(prev => ({ ...prev, isOpen: false }))
+
+    try {
+      setStatus(`Updating ${mod.custom_name || 'mod'}...`)
+      setModLoadingProgress(-1)
+      setIsModsLoading(true)
+
+      const result = await invoke('update_mod', {
+        oldModPath: mod.path,
+        newModSource: newSourcePath,
+        preserveName: preserveName
+      })
+
+      console.log('Update result:', result)
+
+      // Refresh data
+      await loadMods()
+
+      // If we're updating the currently selected mod, we might need to update selection if path changed
+      if (selectedMod && selectedMod.path === mod.path) {
+        // If path changed (preserveName=false), we should try to find the new mod
+        // But loadMods is async, so best effort is to deselect or just let user reselect
+        if (!preserveName) {
+          setSelectedMod(null)
+        }
+      }
+
+      alert.success('Mod Updated', 'Successfully replaced the mod.')
+
+    } catch (e) {
+      console.error('Update failed:', e)
+      alert.error('Update Failed', String(e))
+    } finally {
+      setIsModsLoading(false)
+      setModLoadingProgress(0)
+    }
   }
 
   useEffect(() => {
@@ -706,8 +812,33 @@ function App() {
       await loadFolders()
       await checkGame()
 
+      // Fetch parallel processing status (experimental)
+      try {
+        const parallelStatus = await invoke('get_parallel_processing')
+        setParallelProcessing(parallelStatus)
+      } catch (err) {
+        console.warn('Failed to fetch parallel processing status (expected if backend missing):', err)
+      }
+
       // Start the file watcher
       await invoke('start_file_watcher')
+
+      // Load global app settings (DRP, etc)
+      try {
+        const settings = await invoke('get_drp_settings')
+        if (settings) {
+          if (settings.enable_drp !== undefined) {
+            setEnableDrp(settings.enable_drp)
+          }
+          if (settings.accent_color) {
+            setAccentColor(settings.accent_color)
+            // Also update the theme CSS variables immediately
+            handleAccentChange(settings.accent_color)
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load app settings:', err)
+      }
     } catch (error) {
       console.error('Failed to load initial data:', error)
     }
@@ -1282,6 +1413,9 @@ function App() {
     setIsModsLoading(true)
     setModLoadingProgress(-1)
 
+    // Update DRP status
+    invoke('discord_set_installing').catch(console.warn)
+
     // Use promise toast for loading state and result
     alert.promise(
       (async () => {
@@ -1308,6 +1442,7 @@ function App() {
         } finally {
           setIsModsLoading(false)
           setModLoadingProgress(0)
+          invoke('discord_set_idle').catch(console.warn)
         }
       })(),
       {
@@ -1341,6 +1476,9 @@ function App() {
     setIsModsLoading(true)
     setModLoadingProgress(-1)
 
+    // Update DRP status
+    invoke('discord_set_installing').catch(console.warn)
+
     // Use promise toast for loading state and result
     alert.promise(
       (async () => {
@@ -1367,6 +1505,7 @@ function App() {
         } finally {
           setIsModsLoading(false)
           setModLoadingProgress(0)
+          invoke('discord_set_idle').catch(console.warn)
         }
       })(),
       {
@@ -1653,6 +1792,9 @@ function App() {
     setPanel('install', false)
     setInstallLogs([])
 
+    // Update DRP status to Installing
+    invoke('discord_set_installing').catch(console.warn)
+
     const modCount = modsWithSettings.length
 
     // Start progress bar (indeterminate until backend sends progress events)
@@ -1733,6 +1875,10 @@ function App() {
         await loadTags()
         setStatus('Mods installed successfully!')
 
+        // Reset DRP status to Idle (or effective mod count if we could easily get it)
+        // For now, Idle is safe and functionally correct
+        invoke('discord_set_idle').catch(console.warn)
+
         // Show warning after success if game is running
         if (gameRunning) {
           alert.warning(
@@ -1761,23 +1907,56 @@ function App() {
     )
   }
 
-  const handleSaveSettings = (settings) => {
-    setGlobalUsmap(settings.globalUsmap || '')
-    setHideSuffix(settings.hideSuffix || false)
-    setAutoOpenDetails(settings.autoOpenDetails || false)
-    setShowHeroIcons(settings.showHeroIcons || false)
-    setShowHeroBg(settings.showHeroBg || false)
-    setShowModType(settings.showModType || false)
-    setShowExperimental(settings.showExperimental || false)
+  const handleSaveSettings = async (settings) => {
+    setGlobalUsmap(settings.globalUsmap)
+    setHideSuffix(settings.hideSuffix)
+    setAutoOpenDetails(settings.autoOpenDetails)
+    setShowHeroIcons(settings.showHeroIcons)
+    setShowHeroBg(settings.showHeroBg)
+    setShowModType(settings.showModType)
+    setShowExperimental(settings.showExperimental)
+    setAutoCheckUpdates(settings.autoCheckUpdates)
+    setEnableDrp(settings.enableDrp)
+
+    // Handle DRP toggle
+    if (settings.enableDrp && !enableDrp) {
+      // Turned ON
+      invoke('discord_connect')
+        .then(() => invoke('discord_set_managing_mods', { modCount: mods.flat().length })) // simplistic count, assumes mods is array. wait, mods is array.
+        .catch(console.warn)
+    } else if (!settings.enableDrp && enableDrp) {
+      // Turned OFF
+      invoke('discord_disconnect').catch(console.warn)
+    }
+
+    // Handle Theme Change for DRP
+    if (settings.enableDrp || (settings.enableDrp && !enableDrp)) {
+      // Find color name
+      const themeName = Object.keys(ACCENT_COLORS_MAP).find(key => ACCENT_COLORS_MAP[key] === accentColor) || 'blue'
+      invoke('discord_set_theme', { theme: themeName }).catch(console.warn)
+    }
+
+    await invoke('save_drp_settings', {
+      settings: {
+        enable_drp: settings.enableDrp,
+        accent_color: accentColor
+      }
+    })
 
     // Save to localStorage for persistence
     localStorage.setItem('hideSuffix', JSON.stringify(settings.hideSuffix || false))
     localStorage.setItem('autoOpenDetails', JSON.stringify(settings.autoOpenDetails || false))
     localStorage.setItem('showHeroIcons', JSON.stringify(settings.showHeroIcons || false))
     localStorage.setItem('showHeroBg', JSON.stringify(settings.showHeroBg || false))
-    localStorage.setItem('showHeroBg', JSON.stringify(settings.showHeroBg || false))
     localStorage.setItem('showModType', JSON.stringify(settings.showModType || false))
     localStorage.setItem('showExperimental', JSON.stringify(settings.showExperimental || false))
+    localStorage.setItem('autoCheckUpdates', JSON.stringify(settings.autoCheckUpdates || false))
+    localStorage.setItem('parallelProcessing', JSON.stringify(settings.parallelProcessing || false))
+
+    // Apply parallel processing setting (if changed)
+    if (settings.parallelProcessing !== parallelProcessing) {
+      handleSetParallelProcessing(settings.parallelProcessing)
+    }
 
     // Revert to normal list view if disabling experimental features while in compact list
     if (settings.showExperimental === false && viewMode === 'list-compact') {
@@ -1800,6 +1979,7 @@ function App() {
     const savedShowHeroBg = JSON.parse(localStorage.getItem('showHeroBg') || 'false');
     const savedShowModType = JSON.parse(localStorage.getItem('showModType') || 'false');
     const savedShowExperimental = JSON.parse(localStorage.getItem('showExperimental') || 'false');
+    const savedParallelProcessing = JSON.parse(localStorage.getItem('parallelProcessing') || 'false');
 
     handleThemeChange(savedTheme);
     handleAccentChange(savedAccent);
@@ -1810,7 +1990,9 @@ function App() {
     setShowHeroBg(savedShowHeroBg);
     setShowModType(savedShowModType);
     setShowExperimental(savedShowExperimental);
+    setParallelProcessing(savedParallelProcessing);
   }, []);
+
 
   // Add these handlers
   const handleThemeChange = (newTheme) => {
@@ -1884,7 +2066,7 @@ function App() {
 
         {panels.settings && (
           <SettingsPanel
-            settings={{ globalUsmap, hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType, showExperimental }}
+            settings={{ globalUsmap, hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType, showExperimental, enableDrp, parallelProcessing }}
             onSave={handleSaveSettings}
             onClose={() => setPanel('settings', false)}
             theme={theme}
@@ -1895,6 +2077,7 @@ function App() {
             onAutoDetectGamePath={handleAutoDetect}
             onBrowseGamePath={handleBrowseGamePath}
             isGamePathLoading={loading}
+            setParallelProcessing={handleSetParallelProcessing}
           />
         )}
 
@@ -1974,6 +2157,14 @@ function App() {
           setNewFolderPrompt(null)
           setStatus('Folder creation cancelled')
         }}
+      />
+
+      <UpdateModModal
+        isOpen={updateModState.isOpen}
+        onClose={() => setUpdateModState(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={handleConfirmUpdate}
+        oldMod={updateModState.mod}
+        newSourcePath={updateModState.newSourcePath}
       />
 
 
@@ -2417,6 +2608,7 @@ function App() {
                     initialDetails={modDetails[selectedMod.path]}
                     onClose={() => setSelectedMod(null)}
                     characterData={characterData}
+                    onUpdateMod={() => handleInitiateUpdate(selectedMod)}
                   />
                 </div>
 
@@ -2477,6 +2669,7 @@ function App() {
               }
             }}
             onCheckConflicts={() => contextMenu.mod && handleCheckSingleModClashes(contextMenu.mod)}
+            onUpdateMod={() => contextMenu.mod && handleInitiateUpdate(contextMenu.mod)}
             allTags={allTags}
             gamePath={gamePath}
           />
