@@ -5,7 +5,8 @@ import { AnimatedThemeToggler } from './ui/AnimatedThemeToggler'
 import Switch from './ui/Switch'
 import Checkbox from './ui/Checkbox'
 import { LuFolderInput } from "react-icons/lu"
-import { RiSparkling2Fill, RiFlaskLine } from "react-icons/ri"
+import { RiSparkling2Fill } from "react-icons/ri"
+import { CgPerformance } from "react-icons/cg"
 import { MdRefresh } from "react-icons/md"
 import { FaDiscord } from "react-icons/fa"
 import './SettingsPanel.css'
@@ -231,7 +232,7 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
                   checked={showHeroIcons}
                   onChange={(checked) => setShowHeroIcons(checked)}
                 >
-                  <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Show hero icons on mod cards (experimental)</span>
+                  <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Show hero icons on mod cards</span>
                 </Checkbox>
               </div>
               <div>
@@ -239,7 +240,7 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
                   checked={showHeroBg}
                   onChange={(checked) => setShowHeroBg(checked)}
                 >
-                  <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Show hero background on mod cards (experimental)</span>
+                  <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Show hero background on mod cards</span>
                 </Checkbox>
               </div>
               <div>
@@ -255,7 +256,7 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
                   checked={showExperimental}
                   onChange={(checked) => setShowExperimental(checked)}
                 >
-                  <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Enables "Compact List" view (experimental)</span>
+                  <span style={{ paddingLeft: '4px', fontWeight: 'normal', opacity: 0.9 }}>Enables "Compact List" view</span>
                 </Checkbox>
               </div>
             </div>
@@ -266,16 +267,31 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
             <div className="setting-group">
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center' }}>
-                  <RiFlaskLine style={{ marginRight: '8px', color: '#ff9800' }} />
-                  <span style={{ fontWeight: 'normal', opacity: 0.9 }}>Enable Parallel Processing</span>
+                  <CgPerformance style={{ marginRight: '8px', color: accentColor }} />
+                  <span style={{ fontWeight: 'normal', opacity: 0.9 }}>Parallel Processing Mode</span>
                 </div>
-                <Switch
-                  checked={parallelProcessing}
-                  onChange={(checked) => setLocalParallelProcessing(checked)}
-                />
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <span style={{
+                    fontSize: '0.85rem',
+                    opacity: parallelProcessing ? 1 : 0.8,
+                    fontWeight: parallelProcessing ? '900' : '500',
+                    fontStyle: parallelProcessing ? 'italic' : 'normal',
+                    color: parallelProcessing ? accentColor : 'inherit',
+                    textShadow: parallelProcessing ? '2px 2px 0px rgba(0,0,0,0.2)' : 'none',
+                    transition: 'all 0.2s ease'
+                  }}>
+                    {parallelProcessing ? 'BOOST' : 'Normal'}
+                  </span>
+                  <Switch style={{ marginTop: '0.5rem' }}
+                    checked={parallelProcessing}
+                    onChange={(checked) => setLocalParallelProcessing(checked)}
+                  />
+                </div>
               </div>
-              <p style={{ fontSize: '0.8rem', opacity: 0.6, marginLeft: '24px' }}>
-                Enables concurrent processing for backend operations.
+              <p style={{ fontSize: '0.8rem', opacity: 0.6, marginLeft: '24px', marginTop: '-0.8rem' }}>
+                {parallelProcessing
+                  ? 'Boost mode uses 75% of available threads for backend operations.'
+                  : 'Normal mode uses 50% of available threads for backend operations.'}
               </p>
             </div>
           </div>
@@ -288,12 +304,12 @@ export default function SettingsPanel({ settings, onSave, onClose, theme, setThe
                   <FaDiscord style={{ color: '#5865F2', marginRight: '8px' }} />
                   <span style={{ fontWeight: 'normal', opacity: 0.9 }}>Enable Discord Rich Presence</span>
                 </div>
-                <Switch
+                <Switch style={{ marginTop: '0.5rem' }}
                   checked={enableDrp}
                   onChange={(checked) => setEnableDrp(checked)}
                 />
               </div>
-              <p style={{ fontSize: '0.8rem', opacity: 0.6, marginLeft: '24px' }}>
+              <p style={{ fontSize: '0.8rem', opacity: 0.6, marginLeft: '24px', marginTop: '-0.8rem' }}>
                 Show your active modding status on Discord.
               </p>
             </div>
