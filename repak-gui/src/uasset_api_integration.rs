@@ -144,43 +144,49 @@ fn convert_texture_to_inline_python(uasset_path: &Path) -> Result<bool, Box<dyn 
 }
 
 /// Batch convert multiple textures to inline format by stripping mipmaps.
-/// This processes each file individually using native C# UAssetTool.
+/// Uses the global UAssetToolkit singleton and sends ALL files in a single batch request
+/// for optimal performance - no repeated process spawning.
 /// 
 /// Returns (success_count, skip_count, error_count, processed_file_names)
 pub fn batch_convert_textures_to_inline(uasset_paths: &[std::path::PathBuf]) -> Result<(usize, usize, usize, Vec<String>), Box<dyn std::error::Error>> {
+    batch_convert_textures_to_inline_with_parallel(uasset_paths, false)
+}
+
+/// Batch convert multiple textures to inline format with optional parallel processing.
+/// When parallel=true, uses multi-threaded processing in UAssetTool for faster batch operations.
+/// 
+/// Returns (success_count, skip_count, error_count, processed_file_names)
+pub fn batch_convert_textures_to_inline_with_parallel(uasset_paths: &[std::path::PathBuf], parallel: bool) -> Result<(usize, usize, usize, Vec<String>), Box<dyn std::error::Error>> {
     if uasset_paths.is_empty() {
+        info!("[C#] No textures to process, returning early");
         return Ok((0, 0, 0, Vec::new()));
     }
     
     // Get USMAP path from environment variable
     let usmap_path = std::env::var("USMAP_PATH").ok();
-    info!("[C#] Batch stripping mipmaps for {} textures using UAssetTool (USMAP: {:?})", uasset_paths.len(), usmap_path);
+    info!("[C#] Batch stripping mipmaps for {} textures using global UAssetTool singleton (parallel={}, USMAP: {:?})", 
+          uasset_paths.len(), parallel, usmap_path);
     
-    let mut success_count = 0;
-    let mut skip_count = 0;
-    let mut error_count = 0;
-    let mut processed_files = Vec::new();
+    // Convert PathBuf to String for the batch API
+    let file_paths: Vec<String> = uasset_paths
+        .iter()
+        .map(|p| p.to_string_lossy().to_string())
+        .collect();
     
-    for path in uasset_paths {
-        match convert_texture_to_inline_csharp_with_usmap(path, usmap_path.as_deref()) {
-            Ok(true) => {
-                success_count += 1;
-                if let Some(name) = path.file_name() {
-                    processed_files.push(name.to_string_lossy().to_string());
-                }
-            }
-            Ok(false) => {
-                skip_count += 1;
-            }
-            Err(e) => {
-                error!("[C#] Failed to process {:?}: {}", path, e);
-                error_count += 1;
-            }
+    info!("[C#] Calling batch_strip_mipmaps_native_parallel with {} files...", file_paths.len());
+    
+    // Use the global singleton batch function with parallel option
+    // This is much faster than creating a new process for each file
+    match uasset_toolkit::batch_strip_mipmaps_native_parallel(&file_paths, usmap_path.as_deref(), parallel) {
+        Ok((success_count, skip_count, error_count, processed_files)) => {
+            info!("[C#] Batch complete: {} stripped, {} skipped, {} errors", success_count, skip_count, error_count);
+            Ok((success_count, skip_count, error_count, processed_files))
+        }
+        Err(e) => {
+            error!("[C#] Batch strip mipmaps failed: {}", e);
+            Err(e.into())
         }
     }
-    
-    info!("[C#] Batch complete: {} stripped, {} skipped, {} errors", success_count, skip_count, error_count);
-    Ok((success_count, skip_count, error_count, processed_files))
 }
 
 /// Processes texture files using UAssetAPI toolkit for MipGenSettings modification

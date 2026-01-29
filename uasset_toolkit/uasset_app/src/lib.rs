@@ -2,121 +2,385 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::OnceLock;
-use tokio::process::{Command as AsyncCommand, Child, ChildStdin, ChildStdout};
-use tokio::io::{BufReader, AsyncBufReadExt, AsyncWriteExt, Lines};
-use tokio::sync::Mutex as TokioMutex;
+use std::sync::{OnceLock, Mutex as StdMutex, mpsc};
+use std::io::{BufRead, BufReader as StdBufReader, Write};
+use std::process::{Command as StdCommand, Child as StdChild, ChildStdin as StdChildStdin, ChildStdout as StdChildStdout};
+use std::time::Duration;
+use std::thread;
 
 #[cfg(windows)]
-#[allow(unused_imports)]
 use std::os::windows::process::CommandExt;
 
 // ============================================================================
-// GLOBAL SINGLETON FOR PERSISTENT UASSETTOOL PROCESS
+// SYNCHRONOUS UASSETTOOL WRAPPER
 // ============================================================================
-// This singleton keeps the UAssetTool process alive for the entire app lifetime,
-// eliminating process startup overhead on each operation.
+// This module provides a synchronous interface to UAssetTool using standard
+// library primitives only (no async/tokio) to avoid cross-runtime deadlock issues.
 //
-// Thread-safety: Uses OnceLock for one-time initialization and tokio::sync::Mutex
-// for async-safe access to the child process.
+// Thread-safety: Uses std::sync::Mutex for thread-safe access to the child process.
 // ============================================================================
 
-/// Global singleton for the async UAssetToolkit
-/// Uses Option to handle initialization errors gracefully
-static GLOBAL_TOOLKIT: OnceLock<Option<UAssetToolkit>> = OnceLock::new();
+/// Global singleton for the synchronous UAssetToolkit
+static GLOBAL_TOOLKIT_SYNC: OnceLock<SyncToolkit> = OnceLock::new();
 
-/// Global singleton for the sync wrapper with its own runtime
-static GLOBAL_TOOLKIT_SYNC: OnceLock<Option<GlobalToolkitSync>> = OnceLock::new();
-
-/// Wrapper that holds a dedicated runtime for sync operations
-struct GlobalToolkitSync {
-    runtime: tokio::runtime::Runtime,
+/// Synchronous child process handle using channel-based communication for timeout support
+struct SyncChildProcess {
+    _child: StdChild,
+    stdin: StdChildStdin,
+    response_rx: mpsc::Receiver<std::io::Result<String>>,
 }
 
-impl GlobalToolkitSync {
-    fn new() -> Option<Self> {
-        match tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(2)
-            .enable_all()
-            .build() 
-        {
-            Ok(runtime) => Some(Self { runtime }),
-            Err(e) => {
-                log::error!("[UAssetToolkit] Failed to create sync runtime: {}", e);
-                None
+/// Synchronous toolkit that manages a persistent UAssetTool process
+pub struct SyncToolkit {
+    tool_path: String,
+    process: StdMutex<Option<SyncChildProcess>>,
+}
+
+impl SyncToolkit {
+    pub fn new(tool_path: Option<String>) -> Result<Self> {
+        let tool_path = match tool_path {
+            Some(path) => path,
+            None => Self::find_tool_path()?,
+        };
+        
+        Ok(Self {
+            tool_path,
+            process: StdMutex::new(None),
+        })
+    }
+    
+    fn find_tool_path() -> Result<String> {
+        let exe_path = std::env::current_exe()?;
+        let exe_dir = exe_path.parent().context("Failed to get executable directory")?;
+        let tool_path = exe_dir.join("uassettool").join("UAssetTool.exe");
+        
+        if tool_path.exists() {
+            return Ok(tool_path.to_string_lossy().to_string());
+        }
+        
+        // Try relative to workspace
+        let workspace_tool = Path::new("target/uassettool/UAssetTool.exe");
+        if workspace_tool.exists() {
+            return Ok(workspace_tool.to_string_lossy().to_string());
+        }
+        
+        // Try dev path
+        let dev_tool = Path::new("uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/publish/UAssetTool.exe");
+        if dev_tool.exists() {
+            return Ok(dev_tool.to_string_lossy().to_string());
+        }
+        
+        // Default assumption
+        Ok(tool_path.to_string_lossy().to_string())
+    }
+    
+    fn send_request(&self, request: &UAssetRequest) -> Result<UAssetResponse> {
+        let mut process_guard = self.process.lock()
+            .map_err(|e| anyhow::anyhow!("Failed to acquire process lock: {}", e))?;
+        
+        // Start process if not running
+        if process_guard.is_none() {
+            log::info!("[SyncToolkit] Starting new UAssetTool process: {}", self.tool_path);
+            
+            if !Path::new(&self.tool_path).exists() {
+                anyhow::bail!("UAssetTool executable not found at: {}", self.tool_path);
+            }
+            
+            let mut cmd = StdCommand::new(&self.tool_path);
+            cmd.stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::inherit()); // MUST inherit stderr to avoid deadlock from buffer filling
+            
+            // Pass USMAP_PATH to child process
+            if let Ok(usmap_path) = std::env::var("USMAP_PATH") {
+                cmd.env("USMAP_PATH", &usmap_path);
+                log::info!("[SyncToolkit] Passing USMAP_PATH: {}", usmap_path);
+            }
+            
+            #[cfg(windows)]
+            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+            
+            let mut child = cmd.spawn()
+                .context("Failed to spawn UAssetTool process")?;
+            
+            let stdin = child.stdin.take().context("Failed to get stdin")?;
+            let stdout = child.stdout.take().context("Failed to get stdout")?;
+            
+            // Create channel for timeout-safe reading
+            let (tx, rx) = mpsc::channel();
+            
+            // Spawn reader thread that sends lines through channel
+            thread::spawn(move || {
+                let reader = StdBufReader::new(stdout);
+                for line in reader.lines() {
+                    if tx.send(line).is_err() {
+                        break; // Channel closed, stop reading
+                    }
+                }
+            });
+            
+            *process_guard = Some(SyncChildProcess { _child: child, stdin, response_rx: rx });
+            log::info!("[SyncToolkit] UAssetTool process started successfully");
+        }
+        
+        let proc = process_guard.as_mut().unwrap();
+        let request_json = serde_json::to_string(request)?;
+        
+        log::info!("[SyncToolkit] Sending request: {}...", &request_json[..std::cmp::min(200, request_json.len())]);
+        
+        // Write request
+        if let Err(e) = writeln!(proc.stdin, "{}", request_json) {
+            *process_guard = None;
+            anyhow::bail!("Failed to write to UAssetTool: {}", e);
+        }
+        
+        if let Err(e) = proc.stdin.flush() {
+            *process_guard = None;
+            anyhow::bail!("Failed to flush to UAssetTool: {}", e);
+        }
+        
+        log::info!("[SyncToolkit] Request sent, waiting for response (timeout: 5 min)...");
+        
+        // Read response with timeout (5 minutes for large batch operations)
+        let timeout = Duration::from_secs(300);
+        match proc.response_rx.recv_timeout(timeout) {
+            Ok(Ok(line)) => {
+                log::info!("[SyncToolkit] Got response: {} bytes", line.len());
+                match serde_json::from_str::<UAssetResponse>(&line) {
+                    Ok(response) => Ok(response),
+                    Err(e) => {
+                        *process_guard = None;
+                        anyhow::bail!("Failed to parse response: {} (Line: {})", e, &line[..std::cmp::min(500, line.len())]);
+                    }
+                }
+            }
+            Ok(Err(e)) => {
+                *process_guard = None;
+                anyhow::bail!("Failed to read from UAssetTool: {}", e);
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                log::error!("[SyncToolkit] TIMEOUT waiting for UAssetTool response after {:?}", timeout);
+                *process_guard = None;
+                anyhow::bail!("Timeout waiting for UAssetTool response after {:?}", timeout);
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                *process_guard = None;
+                anyhow::bail!("UAssetTool process closed connection (channel disconnected)");
             }
         }
     }
     
-    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
-        self.runtime.block_on(future)
+    pub fn batch_detect_skeletal_mesh(&self, file_paths: &[String]) -> Result<bool> {
+        let request = UAssetRequest::BatchDetectSkeletalMesh { file_paths: file_paths.to_vec() };
+        let response = self.send_request(&request)?;
+        if !response.success {
+            anyhow::bail!("Failed to batch detect skeletal mesh: {}", response.message);
+        }
+        Ok(response.data.and_then(|d| d.as_bool()).unwrap_or(false))
+    }
+    
+    pub fn batch_detect_static_mesh(&self, file_paths: &[String]) -> Result<bool> {
+        let request = UAssetRequest::BatchDetectStaticMesh { file_paths: file_paths.to_vec() };
+        let response = self.send_request(&request)?;
+        if !response.success {
+            anyhow::bail!("Failed to batch detect static mesh: {}", response.message);
+        }
+        Ok(response.data.and_then(|d| d.as_bool()).unwrap_or(false))
+    }
+    
+    pub fn batch_detect_texture(&self, file_paths: &[String]) -> Result<bool> {
+        let request = UAssetRequest::BatchDetectTexture { file_paths: file_paths.to_vec() };
+        let response = self.send_request(&request)?;
+        if !response.success {
+            anyhow::bail!("Failed to batch detect texture: {}", response.message);
+        }
+        Ok(response.data.and_then(|d| d.as_bool()).unwrap_or(false))
+    }
+    
+    pub fn batch_detect_blueprint(&self, file_paths: &[String]) -> Result<bool> {
+        let request = UAssetRequest::BatchDetectBlueprint { file_paths: file_paths.to_vec() };
+        let response = self.send_request(&request)?;
+        if !response.success {
+            anyhow::bail!("Failed to batch detect blueprint: {}", response.message);
+        }
+        Ok(response.data.and_then(|d| d.as_bool()).unwrap_or(false))
+    }
+    
+    pub fn is_texture_uasset(&self, file_path: &str) -> Result<bool> {
+        self.batch_detect_texture(&[file_path.to_string()])
+    }
+    
+    pub fn strip_mipmaps_native(&self, file_path: &str, usmap_path: Option<&str>) -> Result<bool> {
+        let request = UAssetRequest::StripMipmapsNative {
+            file_path: file_path.to_string(),
+            usmap_path: usmap_path.map(|s| s.to_string()),
+        };
+        let response = self.send_request(&request)?;
+        if !response.success {
+            anyhow::bail!("Failed to strip mipmaps native: {}", response.message);
+        }
+        Ok(true)
+    }
+    
+    pub fn convert_texture(&self, file_path: &str) -> Result<bool> {
+        let request = UAssetRequest::ConvertTexture {
+            file_path: file_path.to_string(),
+        };
+        let response = self.send_request(&request)?;
+        if !response.success {
+            anyhow::bail!("Failed to convert texture: {}", response.message);
+        }
+        Ok(true)
+    }
+    
+    pub fn set_no_mipmaps(&self, file_path: &str) -> Result<()> {
+        let request = UAssetRequest::SetMipGen {
+            file_path: file_path.to_string(),
+            mip_gen: "NoMipmaps".to_string(),
+        };
+        let response = self.send_request(&request)?;
+        if !response.success {
+            anyhow::bail!("Failed to set no mipmaps: {}", response.message);
+        }
+        Ok(())
+    }
+    
+    pub fn batch_has_inline_texture_data(&self, file_paths: &[String], usmap_path: Option<&str>) -> Result<Vec<String>> {
+        let request = UAssetRequest::BatchHasInlineTextureData {
+            file_paths: file_paths.to_vec(),
+            usmap_path: usmap_path.map(|s| s.to_string()),
+        };
+        
+        let response = self.send_request(&request)?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to batch check inline texture data: {}", response.message);
+        }
+        
+        // Parse response as list of file paths with inline data
+        let inline_files = response.data
+            .and_then(|d| d.as_array().cloned())
+            .map(|arr| {
+                arr.into_iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        
+        Ok(inline_files)
+    }
+    
+    pub fn batch_strip_mipmaps_native(&self, file_paths: &[String], usmap_path: Option<&str>, parallel: bool) -> Result<(usize, usize, usize, Vec<String>)> {
+        let request = UAssetRequest::BatchStripMipmapsNative {
+            file_paths: file_paths.to_vec(),
+            usmap_path: usmap_path.map(|s| s.to_string()),
+            parallel,
+        };
+        
+        let response = self.send_request(&request)?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to batch strip mipmaps: {}", response.message);
+        }
+        
+        let data = response.data.unwrap_or(serde_json::json!({}));
+        let success_count = data.get("success_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let skip_count = data.get("skip_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let error_count = data.get("error_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        
+        let mut processed_files = Vec::new();
+        if let Some(results) = data.get("results").and_then(|v| v.as_array()) {
+            for result in results {
+                if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
+                    if result.get("skipped").and_then(|v| v.as_bool()).unwrap_or(false) {
+                        continue;
+                    }
+                    if let Some(path) = result.get("path").and_then(|v| v.as_str()) {
+                        if let Some(file_name) = std::path::Path::new(path).file_stem() {
+                            processed_files.push(file_name.to_string_lossy().to_string());
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok((success_count, skip_count, error_count, processed_files))
+    }
+    
+    pub fn list_iostore_files(&self, file_path: &str, aes_key: Option<&str>) -> Result<IoStoreListResult> {
+        let request = UAssetRequest::ListIoStoreFiles {
+            file_path: file_path.to_string(),
+            aes_key: aes_key.map(|s| s.to_string()),
+        };
+        
+        let response = self.send_request(&request)?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to list IoStore files: {}", response.message);
+        }
+        
+        let data = response.data.unwrap_or(serde_json::json!({}));
+        let package_count = data.get("package_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let container_name = data.get("container_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let files = data.get("files")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect())
+            .unwrap_or_default();
+        
+        Ok(IoStoreListResult { package_count, container_name, files })
+    }
+    
+    pub fn create_mod_iostore(&self, output_path: &str, input_dir: &str, usmap_path: Option<&str>, mount_point: Option<&str>, compress: Option<bool>, aes_key: Option<&str>, parallel: bool) -> Result<IoStoreResult> {
+        let request = UAssetRequest::CreateModIoStore {
+            output_path: output_path.to_string(),
+            input_dir: input_dir.to_string(),
+            usmap_path: usmap_path.map(|s| s.to_string()),
+            mount_point: mount_point.map(|s| s.to_string()),
+            compress,
+            aes_key: aes_key.map(|s| s.to_string()),
+            parallel,
+        };
+        
+        let response = self.send_request(&request)?;
+        
+        if !response.success {
+            anyhow::bail!("Failed to create mod IoStore: {}", response.message);
+        }
+        
+        let data = response.data.unwrap_or(serde_json::json!({}));
+        let utoc_path = data.get("utoc_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let ucas_path = data.get("ucas_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let pak_path = data.get("pak_path").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let converted_count = data.get("converted_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        let file_count = data.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+        
+        Ok(IoStoreResult { utoc_path, ucas_path, pak_path, converted_count, file_count })
     }
 }
 
-/// Get or initialize the global async UAssetToolkit singleton
-pub fn get_global_toolkit() -> Result<&'static UAssetToolkit> {
-    let toolkit_opt = GLOBAL_TOOLKIT.get_or_init(|| {
-        log::info!("[UAssetToolkit] Initializing global singleton...");
-        match UAssetToolkit::new(None) {
-            Ok(toolkit) => {
-                log::info!("[UAssetToolkit] Global singleton created successfully");
-                Some(toolkit)
+/// Get or initialize the global synchronous toolkit
+pub fn get_global_toolkit() -> Result<&'static SyncToolkit> {
+    let toolkit = GLOBAL_TOOLKIT_SYNC.get_or_init(|| {
+        log::info!("[SyncToolkit] Initializing global singleton...");
+        match SyncToolkit::new(None) {
+            Ok(t) => {
+                log::info!("[SyncToolkit] Global singleton created successfully");
+                t
             }
             Err(e) => {
-                log::error!("[UAssetToolkit] Failed to create global singleton: {}", e);
-                None
+                log::error!("[SyncToolkit] Failed to create singleton: {}", e);
+                panic!("Failed to initialize SyncToolkit: {}", e);
             }
         }
     });
-    
-    toolkit_opt.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("UAssetToolkit global singleton failed to initialize")
-    })
+    Ok(toolkit)
 }
 
-/// Initialize the global toolkit at app startup (optional, for eager initialization)
-/// Call this early in main() to start the UAssetTool process immediately
+/// Initialize the global toolkit at app startup
 pub fn init_global_toolkit() -> Result<()> {
     get_global_toolkit()?;
-    // Also initialize the sync wrapper's runtime
-    get_global_toolkit_sync()?;
-    log::info!("[UAssetToolkit] Global singleton initialized successfully");
+    log::info!("[SyncToolkit] Global singleton initialized successfully");
     Ok(())
-}
-
-/// Get or initialize the global sync runtime for blocking operations
-fn get_global_toolkit_sync() -> Result<&'static GlobalToolkitSync> {
-    let sync_opt = GLOBAL_TOOLKIT_SYNC.get_or_init(|| {
-        log::info!("[UAssetToolkit] Initializing global sync runtime...");
-        GlobalToolkitSync::new()
-    });
-    
-    sync_opt.as_ref().ok_or_else(|| {
-        anyhow::anyhow!("UAssetToolkit sync runtime failed to initialize")
-    })
-}
-
-// ============================================================================
-// SYNC API USING GLOBAL SINGLETON
-// ============================================================================
-// These functions provide a simple sync API that uses the global singleton.
-// They handle runtime context detection automatically.
-// ============================================================================
-
-/// Helper to run async code on the global singleton, handling runtime context
-fn run_on_global<F, T>(future: F) -> Result<T>
-where
-    F: std::future::Future<Output = Result<T>>,
-{
-    // Check if we're already inside a tokio runtime
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        // We're inside a runtime - use block_in_place to avoid nested runtime panic
-        tokio::task::block_in_place(|| handle.block_on(future))
-    } else {
-        // Not in a runtime - use the global sync runtime
-        let sync = get_global_toolkit_sync()?;
-        sync.block_on(future)
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -157,7 +421,7 @@ pub enum UAssetRequest {
     StripMipmapsNative { file_path: String, usmap_path: Option<String> },
     // Batch native C# mipmap stripping - processes multiple files in one call
     #[serde(rename = "batch_strip_mipmaps_native")]
-    BatchStripMipmapsNative { file_paths: Vec<String>, usmap_path: Option<String> },
+    BatchStripMipmapsNative { file_paths: Vec<String>, usmap_path: Option<String>, #[serde(default)] parallel: bool },
     // Check if texture has inline data (no .ubulk needed)
     #[serde(rename = "has_inline_texture_data")]
     HasInlineTextureData { file_path: String, usmap_path: Option<String> },
@@ -191,7 +455,7 @@ pub enum UAssetRequest {
     #[serde(rename = "extract_script_objects")]
     ExtractScriptObjects { file_path: String, output_path: String },
     #[serde(rename = "create_mod_iostore")]
-    CreateModIoStore { output_path: String, input_dir: String, usmap_path: Option<String>, mount_point: Option<String>, compress: Option<bool>, aes_key: Option<String> },
+    CreateModIoStore { output_path: String, input_dir: String, usmap_path: Option<String>, mount_point: Option<String>, compress: Option<bool>, aes_key: Option<String>, #[serde(default)] parallel: bool },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -217,715 +481,99 @@ pub struct MeshInfo {
     pub is_skeletal_mesh: Option<bool>,
 }
 
-struct ChildProcess {
-    _child: Child,
-    stdin: ChildStdin,
-    reader: Lines<BufReader<ChildStdout>>,
-}
-
-pub struct UAssetToolkit {
-    tool_path: String,
-    process: TokioMutex<Option<ChildProcess>>,
-}
-
-impl UAssetToolkit {
-    /// Create a new UAssetToolkit instance
-    /// 
-    /// # Arguments
-    /// * `tool_path` - Path to the UAssetTool executable. If None, will try to find it in target/uassettool/
-    pub fn new(tool_path: Option<String>) -> Result<Self> {
-        let tool_path = match tool_path {
-            Some(path) => path,
-            None => {
-                // Try to find the tool in the expected location
-                let exe_path = std::env::current_exe()?;
-                let exe_dir = exe_path.parent().context("Failed to get executable directory")?;
-                let tool_path = exe_dir.join("uassettool").join("UAssetTool.exe");
-                
-                if !tool_path.exists() {
-                    // Try relative to workspace
-                    let workspace_tool = Path::new("target/uassettool/UAssetTool.exe");
-                    if workspace_tool.exists() {
-                        workspace_tool.to_string_lossy().to_string()
-                    } else {
-                        // Try looking in the source tools folder as fallback for dev
-                        let dev_tool = Path::new("uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/publish/UAssetTool.exe");
-                         if dev_tool.exists() {
-                            dev_tool.to_string_lossy().to_string()
-                        } else {
-                             // Default assumption
-                             tool_path.to_string_lossy().to_string()
-                        }
-                    }
-                } else {
-                    tool_path.to_string_lossy().to_string()
-                }
-            }
-        };
-
-        Ok(Self { 
-            tool_path,
-            process: TokioMutex::new(None),
-        })
-    }
-
-    async fn send_request(&self, request: UAssetRequest) -> Result<UAssetResponse> {
-        let mut process_guard = self.process.lock().await;
-
-        if process_guard.is_none() {
-             if !Path::new(&self.tool_path).exists() {
-                 anyhow::bail!("UAssetTool executable not found at: {}", self.tool_path);
-             }
-
-            let mut cmd = AsyncCommand::new(&self.tool_path);
-            cmd.stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            
-            // Explicitly pass USMAP_PATH to child process
-            if let Ok(usmap_path) = std::env::var("USMAP_PATH") {
-                cmd.env("USMAP_PATH", &usmap_path);
-            }
-            
-            #[cfg(windows)]
-            cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW flag on Windows
-            
-            let mut child = cmd.spawn()
-                .context("Failed to spawn UAssetBridge process")?;
-
-            let stdin = child.stdin.take().context("Failed to get stdin")?;
-            let stdout = child.stdout.take().context("Failed to get stdout")?;
-            let reader = BufReader::new(stdout).lines();
-            
-            *process_guard = Some(ChildProcess { _child: child, stdin, reader });
-        }
-
-        let proc = process_guard.as_mut().unwrap();
-        let request_json = serde_json::to_string(&request)?;
-        
-        if let Err(e) = proc.stdin.write_all(request_json.as_bytes()).await {
-            *process_guard = None;
-            anyhow::bail!("Failed to write to UAssetBridge (process likely died): {}", e);
-        }
-        
-        if let Err(e) = proc.stdin.write_all(b"\n").await {
-            *process_guard = None;
-            anyhow::bail!("Failed to write newline to UAssetBridge: {}", e);
-        }
-        
-        if let Err(e) = proc.stdin.flush().await {
-            *process_guard = None;
-            anyhow::bail!("Failed to flush to UAssetBridge: {}", e);
-        }
-
-        match proc.reader.next_line().await {
-            Ok(Some(line)) => {
-                match serde_json::from_str::<UAssetResponse>(&line) {
-                    Ok(response) => Ok(response),
-                    Err(e) => {
-                        *process_guard = None;
-                        anyhow::bail!("Failed to parse response from UAssetBridge: {} (Line: {})", e, line);
-                    }
-                }
-            },
-            Ok(None) => {
-                *process_guard = None;
-                anyhow::bail!("UAssetBridge process closed connection (EOF)");
-            },
-            Err(e) => {
-                *process_guard = None;
-                anyhow::bail!("Failed to read from UAssetBridge: {}", e);
-            }
-        }
-    }
-
-    /// Check if a uasset file is a texture asset
-    pub async fn is_texture_uasset(&self, file_path: &str) -> Result<bool> {
-        let request = UAssetRequest::DetectTexture {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to detect texture: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Check if a uasset file is a mesh asset
-    pub async fn is_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        let request = UAssetRequest::DetectMesh {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to detect mesh: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Check if a uasset file is a skeletal mesh asset
-    pub async fn is_skeletal_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        let request = UAssetRequest::DetectSkeletalMesh {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to detect skeletal mesh: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Check if a uasset file is a static mesh asset
-    pub async fn is_static_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        let request = UAssetRequest::DetectStaticMesh {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to detect static mesh: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Set mip generation settings to NoMipmaps for a texture uasset
-    pub async fn set_no_mipmaps(&self, file_path: &str) -> Result<()> {
-        self.set_mip_gen(file_path, "NoMipmaps").await
-    }
-
-    /// Set mip generation settings for a texture uasset
-    pub async fn set_mip_gen(&self, file_path: &str, mip_gen: &str) -> Result<()> {
-        let request = UAssetRequest::SetMipGen {
-            file_path: file_path.to_string(),
-            mip_gen: mip_gen.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to set mip gen: {}", response.message);
-        }
-        
-        Ok(())
-    }
-
-    /// Get texture information from a uasset file
-    pub async fn get_texture_info(&self, file_path: &str) -> Result<TextureInfo> {
-        let request = UAssetRequest::GetTextureInfo {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to get texture info: {}", response.message);
-        }
-        
-        let data = response.data.unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        let texture_info = TextureInfo {
-            mip_gen_settings: data.get("MipGenSettings").and_then(|v| v.as_str()).map(|s| s.to_string()),
-            width: data.get("Width").and_then(|v| v.as_i64()).map(|i| i as i32),
-            height: data.get("Height").and_then(|v| v.as_i64()).map(|i| i as i32),
-            format: data.get("Format").and_then(|v| v.as_str()).map(|s| s.to_string()),
-        };
-        
-        Ok(texture_info)
-    }
-
-    /// Patch mesh materials in a uasset file
-    pub async fn patch_mesh(&self, file_path: &str, uexp_path: &str) -> Result<()> {
-        let request = UAssetRequest::PatchMesh {
-            file_path: file_path.to_string(),
-            uexp_path: uexp_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to patch mesh: {}", response.message);
-        }
-        
-        Ok(())
-    }
-
-    /// Get mesh information from a uasset file
-    pub async fn get_mesh_info(&self, file_path: &str) -> Result<MeshInfo> {
-        let request = UAssetRequest::GetMeshInfo {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to get mesh info: {}", response.message);
-        }
-        
-        let data = response.data.unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        let mesh_info = MeshInfo {
-            material_count: data.get("MaterialCount").and_then(|v| v.as_i64()).map(|i| i as i32),
-            vertex_count: data.get("VertexCount").and_then(|v| v.as_i64()).map(|i| i as i32),
-            triangle_count: data.get("TriangleCount").and_then(|v| v.as_i64()).map(|i| i as i32),
-            is_skeletal_mesh: data.get("IsSkeletalMesh").and_then(|v| v.as_bool()),
-        };
-        
-        Ok(mesh_info)
-    }
-
-    /// Process a uasset file: detect if it's a texture and set NoMipmaps if it is
-    /// Returns true if the file was processed (was a texture), false otherwise
-    pub async fn process_texture_uasset(&self, file_path: &str) -> Result<bool> {
-        if self.is_texture_uasset(file_path).await? {
-            self.set_no_mipmaps(file_path).await?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Process a mesh uasset file: detect if it's a mesh and patch materials if it is
-    /// Returns true if the file was processed (was a mesh), false otherwise
-    pub async fn process_mesh_uasset(&self, file_path: &str, uexp_path: &str) -> Result<bool> {
-        if self.is_mesh_uasset(file_path).await? {
-            self.patch_mesh(file_path, uexp_path).await?;
-            Ok(true)
-        } else {
-            Ok(false)
-        }
-    }
-
-    /// Convert texture using UE4-DDS-Tools (export -> re-inject with no_mipmaps)
-    /// This is the safest texture conversion method that:
-    /// 1. Exports the texture to DDS
-    /// 2. Re-injects with --no_mipmaps flag
-    pub async fn convert_texture(&self, file_path: &str) -> Result<bool> {
-        let request = UAssetRequest::ConvertTexture {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to convert texture: {}", response.message);
-        }
-        
-        Ok(true)
-    }
-
-    /// Strip mipmaps from a texture using UE4-DDS-Tools remove_mipmaps mode
-    pub async fn strip_mipmaps(&self, file_path: &str) -> Result<bool> {
-        let request = UAssetRequest::StripMipmaps {
-            file_path: file_path.to_string(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to strip mipmaps: {}", response.message);
-        }
-        
-        Ok(true)
-    }
-
-    /// Strip mipmaps using native UAssetAPI TextureExport (no Python required)
-    pub async fn strip_mipmaps_native(&self, file_path: &str, usmap_path: Option<&str>) -> Result<bool> {
-        let request = UAssetRequest::StripMipmapsNative {
-            file_path: file_path.to_string(),
-            usmap_path: usmap_path.map(|s| s.to_string()),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to strip mipmaps (native): {}", response.message);
-        }
-        
-        Ok(true)
-    }
-
-    /// Batch strip mipmaps from multiple textures using native UAssetAPI TextureExport
-    /// Returns (success_count, skip_count, error_count) and list of successfully processed file names
-    pub async fn batch_strip_mipmaps_native(&self, file_paths: &[String], usmap_path: Option<&str>) -> Result<(usize, usize, usize, Vec<String>)> {
-        let request = UAssetRequest::BatchStripMipmapsNative {
-            file_paths: file_paths.to_vec(),
-            usmap_path: usmap_path.map(|s| s.to_string()),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to batch strip mipmaps: {}", response.message);
-        }
-        
-        // Parse the response data
-        let data = response.data.unwrap_or(serde_json::json!({}));
-        let success_count = data.get("success_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let skip_count = data.get("skip_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let error_count = data.get("error_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        
-        // Extract successfully processed file names
-        let mut processed_files = Vec::new();
-        if let Some(results) = data.get("results").and_then(|v| v.as_array()) {
-            for result in results {
-                if result.get("success").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    // Skip files that were already processed (skipped)
-                    if result.get("skipped").and_then(|v| v.as_bool()).unwrap_or(false) {
-                        continue;
-                    }
-                    if let Some(path) = result.get("path").and_then(|v| v.as_str()) {
-                        // Extract just the file stem (name without extension)
-                        if let Some(file_name) = std::path::Path::new(path).file_stem() {
-                            processed_files.push(file_name.to_string_lossy().to_string());
-                        }
-                    }
-                }
-            }
-        }
-        
-        Ok((success_count, skip_count, error_count, processed_files))
-    }
-
-    /// Batch detect skeletal meshes - sends all paths at once, returns true if any match
-    pub async fn batch_detect_skeletal_mesh(&self, file_paths: &[String]) -> Result<bool> {
-        let request = UAssetRequest::BatchDetectSkeletalMesh {
-            file_paths: file_paths.to_vec(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to batch detect skeletal mesh: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Batch detect static meshes - sends all paths at once, returns true if any match
-    pub async fn batch_detect_static_mesh(&self, file_paths: &[String]) -> Result<bool> {
-        let request = UAssetRequest::BatchDetectStaticMesh {
-            file_paths: file_paths.to_vec(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to batch detect static mesh: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Batch detect textures - sends all paths at once, returns true if any match
-    pub async fn batch_detect_texture(&self, file_paths: &[String]) -> Result<bool> {
-        let request = UAssetRequest::BatchDetectTexture {
-            file_paths: file_paths.to_vec(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to batch detect texture: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Batch detect blueprints - sends all paths at once, returns true if any match
-    pub async fn batch_detect_blueprint(&self, file_paths: &[String]) -> Result<bool> {
-        let request = UAssetRequest::BatchDetectBlueprint {
-            file_paths: file_paths.to_vec(),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to batch detect blueprint: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Batch process multiple uasset files
-    /// Returns a vector of (file_path, was_processed, error_message)
-    pub async fn batch_process_textures(&self, file_paths: &[String]) -> Vec<(String, bool, Option<String>)> {
-        let mut results = Vec::new();
-        
-        for file_path in file_paths {
-            match self.process_texture_uasset(file_path).await {
-                Ok(was_processed) => results.push((file_path.clone(), was_processed, None)),
-                Err(e) => results.push((file_path.clone(), false, Some(e.to_string()))),
-            }
-        }
-        
-        results
-    }
-
-    /// Check if a texture has inline data (no .ubulk needed)
-    /// Returns true if the texture data is stored inline in the .uexp file
-    pub async fn has_inline_texture_data(&self, file_path: &str, usmap_path: Option<&str>) -> Result<bool> {
-        let request = UAssetRequest::HasInlineTextureData {
-            file_path: file_path.to_string(),
-            usmap_path: usmap_path.map(|s| s.to_string()),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to check inline texture data: {}", response.message);
-        }
-        
-        Ok(response.data
-            .and_then(|d| d.as_bool())
-            .unwrap_or(false))
-    }
-
-    /// Batch check for inline texture data
-    /// Returns a list of file paths that have inline texture data
-    pub async fn batch_has_inline_texture_data(&self, file_paths: &[String], usmap_path: Option<&str>) -> Result<Vec<String>> {
-        let request = UAssetRequest::BatchHasInlineTextureData {
-            file_paths: file_paths.to_vec(),
-            usmap_path: usmap_path.map(|s| s.to_string()),
-        };
-        
-        let response = self.send_request(request).await?;
-        
-        if !response.success {
-            anyhow::bail!("Failed to batch check inline texture data: {}", response.message);
-        }
-        
-        // Parse the response data as a list of file paths
-        let inline_files = response.data
-            .and_then(|d| d.as_array().cloned())
-            .map(|arr| {
-                arr.into_iter()
-                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                    .collect()
-            })
-            .unwrap_or_default();
-        
-        Ok(inline_files)
-    }
-}
-
-/// Synchronous wrapper for common operations (blocks on tokio runtime)
-/// Handles both cases: when called from within an existing runtime (uses block_in_place)
-/// and when called from outside a runtime (creates its own)
-pub struct UAssetToolkitSync {
-    toolkit: UAssetToolkit,
-    runtime: Option<tokio::runtime::Runtime>,
-}
-
-impl UAssetToolkitSync {
-    pub fn new(bridge_path: Option<String>) -> Result<Self> {
-        let toolkit = UAssetToolkit::new(bridge_path)?;
-        
-        // Check if we're already inside a tokio runtime
-        let runtime = if tokio::runtime::Handle::try_current().is_ok() {
-            // Already in a runtime, don't create a new one
-            None
-        } else {
-            // Not in a runtime, create one
-            Some(tokio::runtime::Runtime::new()?)
-        };
-        
-        Ok(Self { toolkit, runtime })
-    }
-
-    fn block_on<F: std::future::Future>(&self, future: F) -> F::Output {
-        if let Some(ref rt) = self.runtime {
-            // We have our own runtime, use it
-            rt.block_on(future)
-        } else {
-            // We're inside an existing runtime, use block_in_place
-            tokio::task::block_in_place(|| {
-                tokio::runtime::Handle::current().block_on(future)
-            })
-        }
-    }
-
-    pub fn is_texture_uasset(&self, file_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.is_texture_uasset(file_path))
-    }
-
-    pub fn is_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.is_mesh_uasset(file_path))
-    }
-
-    pub fn is_skeletal_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.is_skeletal_mesh_uasset(file_path))
-    }
-
-    pub fn is_static_mesh_uasset(&self, file_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.is_static_mesh_uasset(file_path))
-    }
-
-    pub fn set_no_mipmaps(&self, file_path: &str) -> Result<()> {
-        self.block_on(self.toolkit.set_no_mipmaps(file_path))
-    }
-
-    pub fn patch_mesh(&self, file_path: &str, uexp_path: &str) -> Result<()> {
-        self.block_on(self.toolkit.patch_mesh(file_path, uexp_path))
-    }
-
-    pub fn process_texture_uasset(&self, file_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.process_texture_uasset(file_path))
-    }
-
-    pub fn process_mesh_uasset(&self, file_path: &str, uexp_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.process_mesh_uasset(file_path, uexp_path))
-    }
-
-    pub fn get_texture_info(&self, file_path: &str) -> Result<TextureInfo> {
-        self.block_on(self.toolkit.get_texture_info(file_path))
-    }
-
-    pub fn get_mesh_info(&self, file_path: &str) -> Result<MeshInfo> {
-        self.block_on(self.toolkit.get_mesh_info(file_path))
-    }
-
-    /// Convert texture using UE4-DDS-Tools (export -> re-inject with no_mipmaps)
-    pub fn convert_texture(&self, file_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.convert_texture(file_path))
-    }
-
-    /// Strip mipmaps from a texture using UE4-DDS-Tools
-    pub fn strip_mipmaps(&self, file_path: &str) -> Result<bool> {
-        self.block_on(self.toolkit.strip_mipmaps(file_path))
-    }
-
-    /// Strip mipmaps using native UAssetAPI TextureExport (no Python required)
-    pub fn strip_mipmaps_native(&self, file_path: &str, usmap_path: Option<&str>) -> Result<bool> {
-        self.block_on(self.toolkit.strip_mipmaps_native(file_path, usmap_path))
-    }
-
-    /// Batch strip mipmaps from multiple textures using native UAssetAPI TextureExport
-    /// Returns (success_count, skip_count, error_count) and list of successfully processed file names
-    pub fn batch_strip_mipmaps_native(&self, file_paths: &[String], usmap_path: Option<&str>) -> Result<(usize, usize, usize, Vec<String>)> {
-        self.block_on(self.toolkit.batch_strip_mipmaps_native(file_paths, usmap_path))
-    }
-}
-
 // ============================================================================
-// GLOBAL SYNC API - Preferred way to use UAssetToolkit
+// GLOBAL SYNC API - Module-level functions using the global singleton
 // ============================================================================
-// These module-level functions use the global singleton, eliminating the need
-// to create new UAssetToolkitSync instances. The UAssetTool process is started
-// once and reused for all operations.
-// ============================================================================
-
-/// Check if a file is a texture asset (using global singleton)
-pub fn is_texture_uasset(file_path: &str) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.is_texture_uasset(file_path))
-}
-
-/// Check if a file is a mesh asset (using global singleton)
-pub fn is_mesh_uasset(file_path: &str) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.is_mesh_uasset(file_path))
-}
-
-/// Check if a file is a skeletal mesh asset (using global singleton)
-pub fn is_skeletal_mesh_uasset(file_path: &str) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.is_skeletal_mesh_uasset(file_path))
-}
-
-/// Check if a file is a static mesh asset (using global singleton)
-pub fn is_static_mesh_uasset(file_path: &str) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.is_static_mesh_uasset(file_path))
-}
-
-/// Batch detect skeletal meshes (using global singleton)
-pub fn batch_detect_skeletal_mesh(file_paths: &[String]) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.batch_detect_skeletal_mesh(file_paths))
-}
-
-/// Batch detect static meshes (using global singleton)
-pub fn batch_detect_static_mesh(file_paths: &[String]) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.batch_detect_static_mesh(file_paths))
-}
-
-/// Batch detect textures (using global singleton)
-pub fn batch_detect_texture(file_paths: &[String]) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.batch_detect_texture(file_paths))
-}
-
-/// Batch detect blueprints (using global singleton)
-pub fn batch_detect_blueprint(file_paths: &[String]) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.batch_detect_blueprint(file_paths))
-}
-
-/// Strip mipmaps using native UAssetAPI (using global singleton)
-pub fn strip_mipmaps_native(file_path: &str, usmap_path: Option<&str>) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.strip_mipmaps_native(file_path, usmap_path))
-}
-
-/// Patch mesh materials in a uasset file (using global singleton)
-pub fn patch_mesh(file_path: &str, uexp_path: &str) -> Result<()> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.patch_mesh(file_path, uexp_path))
-}
 
 /// Batch strip mipmaps from multiple textures (using global singleton)
 /// Returns (success_count, skip_count, error_count, processed_file_names)
 pub fn batch_strip_mipmaps_native(file_paths: &[String], usmap_path: Option<&str>) -> Result<(usize, usize, usize, Vec<String>)> {
+    batch_strip_mipmaps_native_parallel(file_paths, usmap_path, false)
+}
+
+/// Batch strip mipmaps with parallel processing option (using global singleton)
+/// Returns (success_count, skip_count, error_count, processed_file_names)
+pub fn batch_strip_mipmaps_native_parallel(file_paths: &[String], usmap_path: Option<&str>, parallel: bool) -> Result<(usize, usize, usize, Vec<String>)> {
     let toolkit = get_global_toolkit()?;
-    run_on_global(toolkit.batch_strip_mipmaps_native(file_paths, usmap_path))
+    toolkit.batch_strip_mipmaps_native(file_paths, usmap_path, parallel)
 }
 
-// ============================================================================
-// PAK/IOSTORE OPERATIONS - Using UAssetTool instead of repak/retoc crates
-// ============================================================================
+// Type aliases for backward compatibility
+pub type UAssetToolkit = SyncToolkit;
+pub type UAssetToolkitSync = SyncToolkit;
 
-/// PAK file info returned from list_pak_files
-#[derive(Debug, Serialize, Deserialize)]
-pub struct PakFileInfo {
-    pub path: String,
-    pub size: u64,
-    pub compressed_size: u64,
+/// Check if a file is a skeletal mesh (using global singleton)
+pub fn is_skeletal_mesh_uasset(file_path: &str) -> Result<bool> {
+    let toolkit = get_global_toolkit()?;
+    toolkit.batch_detect_skeletal_mesh(&[file_path.to_string()])
 }
 
-/// PAK listing result
+/// Check if a file is a texture (using global singleton)
+pub fn is_texture_uasset(file_path: &str) -> Result<bool> {
+    let toolkit = get_global_toolkit()?;
+    toolkit.batch_detect_texture(&[file_path.to_string()])
+}
+
+/// Check if a file is a static mesh (using global singleton)
+pub fn is_static_mesh_uasset(file_path: &str) -> Result<bool> {
+    let toolkit = get_global_toolkit()?;
+    toolkit.batch_detect_static_mesh(&[file_path.to_string()])
+}
+
+/// Recompress an IoStore file (stub - returns error for now)
+pub fn recompress_iostore(_file_path: &str) -> Result<()> {
+    anyhow::bail!("recompress_iostore not yet implemented in sync toolkit")
+}
+
+/// Extract files from an IoStore (stub - returns error for now)  
+pub fn extract_iostore(_file_path: &str, _output_path: &str, _aes_key: Option<&str>) -> Result<usize> {
+    anyhow::bail!("extract_iostore not yet implemented in sync toolkit")
+}
+
+/// Extract script objects (stub - returns error for now)
+pub fn extract_script_objects(_pak_path: &str, _output_path: &str) -> Result<usize> {
+    anyhow::bail!("extract_script_objects not yet implemented in sync toolkit")
+}
+
+/// Check if IoStore is compressed (stub - returns error for now)
+pub fn is_iostore_compressed(_file_path: &str) -> Result<bool> {
+    anyhow::bail!("is_iostore_compressed not yet implemented in sync toolkit")
+}
+
+/// IoStore creation result
 #[derive(Debug, Serialize, Deserialize)]
-pub struct PakListResult {
+pub struct IoStoreResult {
+    pub utoc_path: String,
+    pub ucas_path: String,
+    pub pak_path: String,
+    pub converted_count: usize,
     pub file_count: usize,
-    pub mount_point: String,
-    pub version: i32,
-    pub encrypted_index: bool,
-    pub files: Vec<PakFileInfo>,
+}
+
+/// Create mod IoStore
+/// parallel: when true, uses 75% of CPU threads; when false, uses 50%
+pub fn create_mod_iostore(
+    output_path: &str,
+    input_dir: &str,
+    usmap_path: Option<&str>,
+    mount_point: Option<&str>,
+    compress: Option<bool>,
+    aes_key: Option<&str>,
+    parallel: bool,
+) -> Result<IoStoreResult> {
+    let toolkit = get_global_toolkit()?;
+    toolkit.create_mod_iostore(output_path, input_dir, usmap_path, mount_point, compress, aes_key, parallel)
+}
+
+/// Patch mesh materials (stub - returns error for now)
+pub fn patch_mesh(_file_path: &str, _uexp_path: &str) -> Result<()> {
+    anyhow::bail!("patch_mesh not yet implemented in sync toolkit")
+}
+
+/// List files in IoStore
+pub fn list_iostore_files(file_path: &str, aes_key: Option<&str>) -> Result<IoStoreListResult> {
+    let toolkit = get_global_toolkit()?;
+    toolkit.list_iostore_files(file_path, aes_key)
 }
 
 /// IoStore listing result
@@ -934,371 +582,4 @@ pub struct IoStoreListResult {
     pub package_count: usize,
     pub container_name: String,
     pub files: Vec<String>,
-}
-
-/// List all files in a PAK file (using global singleton)
-pub fn list_pak_files(pak_path: &str, aes_key: Option<&str>) -> Result<PakListResult> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::ListPakFiles {
-            file_path: pak_path.to_string(),
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("list_pak_files failed: {}", response.message);
-        }
-        let data = response.data.ok_or_else(|| anyhow::anyhow!("No data in response"))?;
-        
-        // Parse the response data
-        let file_count = data.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let mount_point = data.get("mount_point").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let version = data.get("version").and_then(|v| v.as_i64()).unwrap_or(0) as i32;
-        let encrypted_index = data.get("encrypted_index").and_then(|v| v.as_bool()).unwrap_or(false);
-        
-        let files = if let Some(files_arr) = data.get("files").and_then(|v| v.as_array()) {
-            files_arr.iter().map(|f| PakFileInfo {
-                path: f.get("path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                size: f.get("size").and_then(|v| v.as_u64()).unwrap_or(0),
-                compressed_size: f.get("compressed_size").and_then(|v| v.as_u64()).unwrap_or(0),
-            }).collect()
-        } else {
-            Vec::new()
-        };
-        
-        Ok(PakListResult { file_count, mount_point, version, encrypted_index, files })
-    })
-}
-
-/// Extract a single file from a PAK (using global singleton)
-pub fn extract_pak_file(pak_path: &str, internal_path: &str, output_path: &str, aes_key: Option<&str>) -> Result<()> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::ExtractPakFile {
-            file_path: pak_path.to_string(),
-            internal_path: internal_path.to_string(),
-            output_path: output_path.to_string(),
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("extract_pak_file failed: {}", response.message);
-        }
-        Ok(())
-    })
-}
-
-/// Extract all files from a PAK to a directory (using global singleton)
-pub fn extract_pak_all(pak_path: &str, output_dir: &str, aes_key: Option<&str>) -> Result<Vec<String>> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::ExtractPakAll {
-            file_path: pak_path.to_string(),
-            output_path: output_dir.to_string(),
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("extract_pak_all failed: {}", response.message);
-        }
-        
-        // Return list of extracted files
-        let files = response.data
-            .and_then(|d| d.get("files").cloned())
-            .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
-            .unwrap_or_default();
-        Ok(files)
-    })
-}
-
-/// Create a PAK file from a list of files (using global singleton)
-pub fn create_pak(output_path: &str, file_paths: &[String], mount_point: Option<&str>, path_hash_seed: Option<u64>, aes_key: Option<&str>) -> Result<()> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::CreatePak {
-            output_path: output_path.to_string(),
-            file_paths: file_paths.to_vec(),
-            mount_point: mount_point.map(|s| s.to_string()),
-            path_hash_seed,
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("create_pak failed: {}", response.message);
-        }
-        Ok(())
-    })
-}
-
-/// Create a companion PAK file for IoStore bundles (using global singleton)
-pub fn create_companion_pak(output_path: &str, file_paths: &[String], mount_point: Option<&str>, path_hash_seed: Option<u64>, aes_key: Option<&str>) -> Result<()> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::CreateCompanionPak {
-            output_path: output_path.to_string(),
-            file_paths: file_paths.to_vec(),
-            mount_point: mount_point.map(|s| s.to_string()),
-            path_hash_seed,
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("create_companion_pak failed: {}", response.message);
-        }
-        Ok(())
-    })
-}
-
-/// List all packages in an IoStore container (using global singleton)
-pub fn list_iostore_files(utoc_path: &str, aes_key: Option<&str>) -> Result<IoStoreListResult> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::ListIoStoreFiles {
-            file_path: utoc_path.to_string(),
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("list_iostore_files failed: {}", response.message);
-        }
-        let data = response.data.ok_or_else(|| anyhow::anyhow!("No data in response"))?;
-        
-        let package_count = data.get("package_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-        let container_name = data.get("container_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let files = data.get("files")
-            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
-            .unwrap_or_default();
-        
-        Ok(IoStoreListResult { package_count, container_name, files })
-    })
-}
-
-/// Create an IoStore bundle from a directory of legacy assets (using global singleton)
-pub fn create_iostore(output_path: &str, input_dir: &str, usmap_path: Option<&str>, compress: bool, aes_key: Option<&str>) -> Result<Vec<String>> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::CreateIoStore {
-            output_path: output_path.to_string(),
-            input_dir: input_dir.to_string(),
-            usmap_path: usmap_path.map(|s| s.to_string()),
-            compress: Some(compress),
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("create_iostore failed: {}", response.message);
-        }
-        
-        // Return list of converted files
-        let files = response.data
-            .and_then(|d| d.get("files").cloned())
-            .and_then(|v| serde_json::from_value::<Vec<String>>(v).ok())
-            .unwrap_or_default();
-        Ok(files)
-    })
-}
-
-/// Check if an IoStore container is compressed (using global singleton)
-pub fn is_iostore_compressed(utoc_path: &str) -> Result<bool> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::IsIoStoreCompressed {
-            file_path: utoc_path.to_string(),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("is_iostore_compressed failed: {}", response.message);
-        }
-        
-        let compressed = response.data
-            .and_then(|d| d.get("compressed").and_then(|v| v.as_bool()))
-            .unwrap_or(false);
-        Ok(compressed)
-    })
-}
-
-/// Recompress an IoStore container with Oodle (using global singleton)
-pub fn recompress_iostore(utoc_path: &str) -> Result<String> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::RecompressIoStore {
-            file_path: utoc_path.to_string(),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("recompress_iostore failed: {}", response.message);
-        }
-        
-        let output_path = response.data
-            .and_then(|d| d.get("output_path").and_then(|v| v.as_str()).map(|s| s.to_string()))
-            .unwrap_or_else(|| utoc_path.to_string());
-        Ok(output_path)
-    })
-}
-
-/// Find UAssetTool.exe for CLI operations
-fn find_uasset_tool() -> Result<std::path::PathBuf> {
-    // Try to find the tool in the expected location
-    let exe_path = std::env::current_exe()?;
-    let exe_dir = exe_path.parent().context("Failed to get executable directory")?;
-    let tool_path = exe_dir.join("uassettool").join("UAssetTool.exe");
-    
-    if tool_path.exists() {
-        return Ok(tool_path);
-    }
-    
-    // Try relative to workspace
-    let workspace_tool = std::path::Path::new("target/uassettool/UAssetTool.exe");
-    if workspace_tool.exists() {
-        return Ok(workspace_tool.to_path_buf());
-    }
-    
-    // Try looking in the source tools folder as fallback for dev
-    let dev_tool = std::path::Path::new("uasset_toolkit/tools/UAssetTool/bin/Release/net8.0/win-x64/publish/UAssetTool.exe");
-    if dev_tool.exists() {
-        return Ok(dev_tool.to_path_buf());
-    }
-    
-    // Default assumption - return the expected path even if it doesn't exist
-    Ok(tool_path)
-}
-
-/// Extract IoStore to legacy format using CLI command (more reliable than JSON API)
-/// Uses `extract_iostore_legacy` with `--mod` argument for proper mod extraction
-pub fn extract_iostore(utoc_path: &str, output_dir: &str, _aes_key: Option<&str>) -> Result<usize> {
-    log::info!("[extract_iostore] Starting CLI extraction: {} -> {}", utoc_path, output_dir);
-    
-    // Find UAssetTool.exe
-    let tool_path = find_uasset_tool()?;
-    log::info!("[extract_iostore] Using tool: {:?}", tool_path);
-    
-    // Determine paks directory by walking up from utoc path to find ~mods folder
-    let utoc_path_buf = std::path::PathBuf::from(utoc_path);
-    let mut paks_dir: Option<std::path::PathBuf> = None;
-    let mut current = utoc_path_buf.parent();
-    while let Some(dir) = current {
-        if let Some(name) = dir.file_name() {
-            if name.to_string_lossy().eq_ignore_ascii_case("~mods") {
-                paks_dir = dir.parent().map(|p| p.to_path_buf());
-                break;
-            }
-        }
-        current = dir.parent();
-    }
-    
-    let paks_dir = paks_dir.ok_or_else(|| anyhow::anyhow!("Could not find Paks directory (utoc must be in ~mods folder)"))?;
-    log::info!("[extract_iostore] Paks directory: {:?}", paks_dir);
-    
-    // Build CLI command: extract_iostore_legacy <paks_dir> <output_dir> --mod <utoc_path>
-    let mut cmd = std::process::Command::new(&tool_path);
-    cmd.arg("extract_iostore_legacy")
-        .arg(&paks_dir)
-        .arg(output_dir)
-        .arg("--mod")
-        .arg(utoc_path);
-    
-    // Hide window on Windows
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-    }
-    
-    log::info!("[extract_iostore] Running: {:?}", cmd);
-    
-    let output = cmd.output()
-        .map_err(|e| anyhow::anyhow!("Failed to run UAssetTool: {}", e))?;
-    
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    
-    log::info!("[extract_iostore] stdout: {}", stdout);
-    if !stderr.is_empty() {
-        log::info!("[extract_iostore] stderr: {}", stderr);
-    }
-    
-    if !output.status.success() {
-        anyhow::bail!("UAssetTool extraction failed: {}\n{}", stdout, stderr);
-    }
-    
-    // Parse output to get count - look for "Extraction complete: X converted"
-    let count = stdout.lines()
-        .find(|line| line.contains("converted"))
-        .and_then(|line| {
-            // Parse "Extraction complete: X converted, Y failed, Z skipped"
-            line.split_whitespace()
-                .find_map(|word| word.parse::<usize>().ok())
-        })
-        .unwrap_or(0);
-    
-    log::info!("[extract_iostore] Extracted {} files", count);
-    Ok(count)
-}
-
-/// Extract ScriptObjects.bin from game paks (using global singleton)
-pub fn extract_script_objects(paks_path: &str, output_path: &str) -> Result<usize> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::ExtractScriptObjects {
-            file_path: paks_path.to_string(),
-            output_path: output_path.to_string(),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("extract_script_objects failed: {}", response.message);
-        }
-        
-        let size = response.data
-            .and_then(|d| d.get("size").and_then(|v| v.as_u64()))
-            .unwrap_or(0) as usize;
-        Ok(size)
-    })
-}
-
-/// Create mod IoStore result
-#[derive(Debug, Serialize, Deserialize)]
-pub struct CreateModIoStoreResult {
-    pub utoc_path: String,
-    pub ucas_path: String,
-    pub pak_path: String,
-    pub converted_count: usize,
-    pub file_count: usize,
-}
-
-/// Create a mod IoStore bundle from a directory of legacy assets (using global singleton)
-/// This is the replacement for retoc's action_to_zen function.
-/// Converts .uasset/.uexp files to Zen format and creates .utoc/.ucas/.pak bundle.
-pub fn create_mod_iostore(
-    output_path: &str,
-    input_dir: &str,
-    usmap_path: Option<&str>,
-    mount_point: Option<&str>,
-    compress: bool,
-    aes_key: Option<&str>,
-) -> Result<CreateModIoStoreResult> {
-    let toolkit = get_global_toolkit()?;
-    run_on_global(async {
-        let request = UAssetRequest::CreateModIoStore {
-            output_path: output_path.to_string(),
-            input_dir: input_dir.to_string(),
-            usmap_path: usmap_path.map(|s| s.to_string()),
-            mount_point: mount_point.map(|s| s.to_string()),
-            compress: Some(compress),
-            aes_key: aes_key.map(|s| s.to_string()),
-        };
-        let response = toolkit.send_request(request).await?;
-        if !response.success {
-            anyhow::bail!("create_mod_iostore failed: {}", response.message);
-        }
-        
-        let data = response.data.ok_or_else(|| anyhow::anyhow!("No data in response"))?;
-        
-        Ok(CreateModIoStoreResult {
-            utoc_path: data.get("utoc_path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            ucas_path: data.get("ucas_path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            pak_path: data.get("pak_path").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            converted_count: data.get("converted_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-            file_count: data.get("file_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
-        })
-    })
 }

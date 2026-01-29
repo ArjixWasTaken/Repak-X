@@ -49,6 +49,9 @@ pub struct InstallableMod {
     pub force_legacy_pak: bool,
     /// Subfolder within the mods directory to install into (empty = root)
     pub install_subfolder: String,
+    /// Enable parallel processing for batch operations (texture stripping, etc.)
+    #[serde(default)]
+    pub parallel_processing: bool,
 }
 
 impl Default for InstallableMod {
@@ -76,6 +79,7 @@ impl Default for InstallableMod {
             contains_uassets: true, // Default to true for safety
             force_legacy_pak: false,
             install_subfolder: String::new(),
+            parallel_processing: false,
         }
     }
 }

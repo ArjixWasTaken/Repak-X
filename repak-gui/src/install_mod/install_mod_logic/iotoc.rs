@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use crate::install_mod::install_mod_logic::pak_files::repak_dir;
 use crate::install_mod::InstallableMod;
-use crate::uasset_api_integration::batch_convert_textures_to_inline;
+use crate::uasset_api_integration::batch_convert_textures_to_inline_with_parallel;
 use crate::utils::collect_files;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicI32;
@@ -111,10 +111,10 @@ pub fn convert_to_iostore_directory(
             info!("No textures with .ubulk files found - skipping texture conversion");
             std::collections::HashSet::new()
         } else {
-            info!("Found {} textures with .ubulk files - batch processing", texture_paths.len());
+            info!("Found {} textures with .ubulk files - batch processing (parallel={})", texture_paths.len(), pak.parallel_processing);
             
-            // Use batch processing for all textures at once
-            match batch_convert_textures_to_inline(&texture_paths) {
+            // Use batch processing for all textures at once with parallel option
+            match batch_convert_textures_to_inline_with_parallel(&texture_paths, pak.parallel_processing) {
                 Ok((success_count, skip_count, error_count, processed_names)) => {
                     info!("Batch texture conversion complete: {} stripped, {} skipped, {} errors", 
                           success_count, skip_count, error_count);
@@ -227,13 +227,15 @@ pub fn convert_to_iostore_directory(
     info!("  Input directory: {}", to_pak_dir.display());
     info!("  Output base: {}", output_base.display());
     
+    // parallel_processing toggle: false=50% threads, true=75% threads
     let result = uasset_toolkit::create_mod_iostore(
         &output_base.to_string_lossy(),
         &to_pak_dir.to_string_lossy(),
         usmap_full_path.as_deref(),
         Some(&pak.mount_point),
-        true, // Enable compression
+        Some(true), // Enable compression
         None, // Use default AES key
+        pak.parallel_processing, // Toggle: false=50%, true=75% CPU threads
     ).map_err(|e| repak::Error::Io(std::io::Error::new(
         std::io::ErrorKind::Other,
         format!("IoStore conversion failed: {}", e),

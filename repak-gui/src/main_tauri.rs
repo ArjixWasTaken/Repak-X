@@ -75,6 +75,9 @@ struct AppState {
     enable_drp: bool,
     #[serde(default)]
     accent_color: Option<String>,
+    /// Enable parallel processing for batch operations
+    #[serde(default)]
+    parallel_processing: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -200,6 +203,26 @@ async fn save_drp_settings(
     
     save_state(&state).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Set parallel processing mode for batch operations
+#[tauri::command]
+async fn set_parallel_processing(
+    enabled: bool,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<(), String> {
+    info!("set_parallel_processing called: enabled={}", enabled);
+    let mut state = state.lock().unwrap();
+    state.parallel_processing = enabled;
+    save_state(&state).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Get current parallel processing setting
+#[tauri::command]
+async fn get_parallel_processing(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
+    let state = state.lock().unwrap();
+    Ok(state.parallel_processing)
 }
 
 #[tauri::command]
@@ -1594,6 +1617,7 @@ async fn install_mods(
     let state_guard = state.lock().unwrap();
     let mod_directory = state_guard.game_path.clone();
     let usmap_filename = state_guard.usmap_path.clone();
+    let parallel_processing = state_guard.parallel_processing;
     drop(state_guard);
 
     // Propagate USMAP path to UAssetTool via environment for UAssetAPI-based processing (from roaming folder)
@@ -1661,6 +1685,8 @@ async fn install_mods(
             installable.force_legacy_pak = mod_to_install.force_legacy;
             installable.install_subfolder = mod_to_install.install_subfolder.clone();
             installable.usmap_path = usmap_filename.clone();
+            // Apply parallel processing setting from app state
+            installable.parallel_processing = parallel_processing;
         }
     }
 
@@ -2995,7 +3021,7 @@ async fn cleanup_ubulk_for_inline_textures(output_dir: &PathBuf) {
             // Get USMAP path from environment
             let usmap_path = std::env::var("USMAP_PATH").ok();
             
-            match toolkit.batch_has_inline_texture_data(&uasset_files, usmap_path.as_deref()).await {
+            match toolkit.batch_has_inline_texture_data(&uasset_files, usmap_path.as_deref()) {
                 Ok(inline_files) => {
                     log::info!("[Extraction] Found {} textures with inline data", inline_files.len());
                     
@@ -3956,8 +3982,9 @@ async fn get_app_version() -> Result<String, String> {
     Ok(env!("CARGO_PKG_VERSION").to_string())
 }
 
+/// Check for application updates and emit update_available event when found
 #[tauri::command]
-async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
+async fn check_for_updates(window: Window) -> Result<Option<UpdateInfo>, String> {
     let client = reqwest::Client::new();
     // Assuming repository is correct based on context
     let url = "https://api.github.com/repos/XzantGaming/Repak-Gui-Revamped/releases/latest";
@@ -3995,12 +4022,18 @@ async fn check_for_updates() -> Result<Option<UpdateInfo>, String> {
                  }
              }
              
-             return Ok(Some(UpdateInfo {
+             let update_info = UpdateInfo {
                  latest: tag_name.to_string(),
                  url,
                  asset_url,
                  asset_name,
-             }));
+             };
+             
+             // Emit update_available event
+             let _ = window.emit("update_available", &update_info);
+             info!("Emitted update_available event for version {}", tag_name);
+             
+             return Ok(Some(update_info));
         }
     }
     
@@ -4098,7 +4131,7 @@ async fn download_update(
     
     info!("Update downloaded to: {:?}", download_path);
     
-    // Emit completion
+    // Emit completion progress
     let progress = UpdateDownloadProgress {
         downloaded_bytes: downloaded,
         total_bytes: total_size,
@@ -4106,6 +4139,14 @@ async fn download_update(
         status: "ready".to_string(),
     };
     let _ = window.emit("update_download_progress", &progress);
+    
+    // Emit update_downloaded event with the downloaded file path
+    let download_result = serde_json::json!({
+        "path": download_path.to_string_lossy().to_string(),
+        "size": downloaded,
+    });
+    let _ = window.emit("update_downloaded", &download_result);
+    info!("Emitted update_downloaded event");
     
     Ok(download_path.to_string_lossy().to_string())
 }
@@ -5760,7 +5801,10 @@ fn main() {
             discord_get_theme,
             // App Settings
             get_drp_settings,
-            save_drp_settings
+            save_drp_settings,
+            // Parallel processing
+            set_parallel_processing,
+            get_parallel_processing
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
