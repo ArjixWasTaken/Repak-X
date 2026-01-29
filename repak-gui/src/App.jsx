@@ -38,6 +38,7 @@ import ExtensionModOverlay from './components/ExtensionModOverlay'
 import QuickOrganizeOverlay from './components/QuickOrganizeOverlay'
 import InputPromptModal from './components/InputPromptModal'
 import UpdateModModal from './components/UpdateModModal'
+import UpdateAppModal from './components/UpdateAppModal'
 import { AuroraText } from './components/ui/AuroraText'
 import { AlertProvider, useAlert } from './components/AlertHandler'
 import { useGlobalTooltips } from './hooks/useGlobalTooltips'
@@ -93,6 +94,12 @@ function App() {
   const [parallelProcessing, setParallelProcessing] = useState(false);
   const [theme, setTheme] = useState('dark');
   const [accentColor, setAccentColor] = useState('#4a9eff');
+
+  // Update system state
+  const [updateInfo, setUpdateInfo] = useState(null); // { latest, url, asset_url, asset_name }
+  const [updateDownloadProgress, setUpdateDownloadProgress] = useState(null); // { percentage, status }
+  const [downloadedUpdatePath, setDownloadedUpdatePath] = useState(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
 
   // Panel visibility state - grouped for cleaner management
   const [panels, setPanels] = useState({
@@ -204,6 +211,70 @@ function App() {
       setStatus('Error checking clashes: ' + error)
     }
   }
+
+  const handleCheckForUpdates = async () => {
+    setIsCheckingUpdates(true);
+    try {
+      const result = await invoke('check_for_updates');
+      if (result) {
+        setUpdateInfo(result);
+        setShowUpdateModal(true);
+        alert.info('Update Available', `Version ${result.latest} is available!`);
+      } else {
+        alert.success('Up to Date', 'You are running the latest version.');
+      }
+    } catch (error) {
+      console.error('Failed to check for updates:', error);
+      alert.error('Update Check Failed', String(error));
+    } finally {
+      setIsCheckingUpdates(false);
+    }
+  };
+
+  const handleDownloadUpdate = async () => {
+    if (!updateInfo?.asset_url || !updateInfo?.asset_name) {
+      // No direct download available, open release page
+      if (updateInfo?.url) {
+        await invoke('open_in_explorer', { path: updateInfo.url });
+      }
+      return;
+    }
+
+    try {
+      const path = await invoke('download_update', {
+        assetUrl: updateInfo.asset_url,
+        assetName: updateInfo.asset_name
+      });
+      setDownloadedUpdatePath(path);
+    } catch (error) {
+      console.error('Download failed:', error);
+      alert.error('Download Failed', String(error));
+    }
+  };
+
+  const handleApplyUpdate = async () => {
+    if (!downloadedUpdatePath) return;
+
+    try {
+      await invoke('apply_update', { downloadedPath: downloadedUpdatePath });
+      alert.success('Update Ready', 'The update will be applied when you close the app.');
+    } catch (error) {
+      console.error('Apply update failed:', error);
+      alert.error('Update Failed', String(error));
+    }
+  };
+
+  const handleCancelUpdate = async () => {
+    try {
+      await invoke('cancel_update_download');
+    } catch (e) {
+      console.warn('Cancel cleanup failed:', e);
+    }
+    setUpdateInfo(null);
+    setUpdateDownloadProgress(null);
+    setDownloadedUpdatePath(null);
+    setShowUpdateModal(false);
+  };
 
   const handleCheckSingleModClashes = async (mod) => {
     try {
@@ -736,6 +807,35 @@ function App() {
       document.removeEventListener('dragover', preventDefault)
       document.removeEventListener('drop', preventDefault)
     }
+  }, [])
+
+  // Listen for update events
+  useEffect(() => {
+    const unlistenUpdateAvailable = listen('update_available', (event) => {
+      console.log('Update available:', event.payload);
+      setUpdateInfo(event.payload);
+      setShowUpdateModal(true);
+    });
+
+    const unlistenUpdateProgress = listen('update_download_progress', (event) => {
+      setUpdateDownloadProgress(event.payload);
+    });
+
+    const unlistenUpdateDownloaded = listen('update_downloaded', (event) => {
+      console.log('Update downloaded:', event.payload);
+      setDownloadedUpdatePath(event.payload.path);
+    });
+
+    const unlistenUpdateReady = listen('update_ready_to_apply', () => {
+      alert.success('Update Ready', 'Close the app to complete the update.');
+    });
+
+    return () => {
+      unlistenUpdateAvailable.then(f => f());
+      unlistenUpdateProgress.then(f => f());
+      unlistenUpdateDownloaded.then(f => f());
+      unlistenUpdateReady.then(f => f());
+    };
   }, [])
 
   // Tauri drag hover detection - use Tauri's events instead of browser events
@@ -1870,9 +1970,10 @@ function App() {
           typeTracker[modType] = count + 1
         }
 
-        await loadMods()
-        await loadFolders()
-        await loadTags()
+        // Reload in background so alert shows success immediately
+        loadMods()
+        loadFolders()
+        loadTags()
         setStatus('Mods installed successfully!')
 
         // Reset DRP status to Idle (or effective mod count if we could easily get it)
@@ -2066,7 +2167,7 @@ function App() {
 
         {panels.settings && (
           <SettingsPanel
-            settings={{ globalUsmap, hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType, showExperimental, enableDrp, parallelProcessing }}
+            settings={{ globalUsmap, hideSuffix, autoOpenDetails, showHeroIcons, showHeroBg, showModType, showExperimental, enableDrp, parallelProcessing, autoCheckUpdates }}
             onSave={handleSaveSettings}
             onClose={() => setPanel('settings', false)}
             theme={theme}
@@ -2078,6 +2179,8 @@ function App() {
             onBrowseGamePath={handleBrowseGamePath}
             isGamePathLoading={loading}
             setParallelProcessing={handleSetParallelProcessing}
+            onCheckForUpdates={handleCheckForUpdates}
+            isCheckingUpdates={isCheckingUpdates}
           />
         )}
 
@@ -2165,6 +2268,17 @@ function App() {
         onConfirm={handleConfirmUpdate}
         oldMod={updateModState.mod}
         newSourcePath={updateModState.newSourcePath}
+      />
+
+      <UpdateAppModal
+        isOpen={showUpdateModal}
+        updateInfo={updateInfo}
+        downloadProgress={updateDownloadProgress}
+        downloadedPath={downloadedUpdatePath}
+        onDownload={handleDownloadUpdate}
+        onApply={handleApplyUpdate}
+        onOpenReleasePage={(url) => invoke('open_in_explorer', { path: url })}
+        onClose={handleCancelUpdate}
       />
 
 

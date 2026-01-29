@@ -51,7 +51,7 @@ const convertToArray = (node) => {
 
 // Folder node component for the tree
 const FolderNode = ({ node, selectedFolderId, onSelect, depth = 0 }) => {
-  const [isOpen, setIsOpen] = useState(true)
+  const [isOpen, setIsOpen] = useState(false)
   const hasChildren = node.children && node.children.length > 0
   const isSelected = selectedFolderId === node.id
 
@@ -121,7 +121,8 @@ const buildInitialSettings = (mods = []) => {
       compression: 'Oodle',
       usmapPath: '',
       customName: '',
-      selectedTags: []
+      selectedTags: [],
+      installSubfolder: null // Per-mod install destination
     }
     return acc
   }, {})
@@ -155,7 +156,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
   const [openDropdown, setOpenDropdown] = useState(null)
   const [dropdownPos, setDropdownPos] = useState({ x: 0, y: 0 })
   const [modSettings, setModSettings] = useState(() => buildInitialSettings(mods))
-  const [selectedFolderId, setSelectedFolderId] = useState(null)
+  // Removed global selectedFolderId since we now track it per-mod in modSettings
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
 
   // Folder tree data
@@ -229,12 +230,12 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
       ...modSettings[idx],
       toRepak: isRepakLocked(mod) ? false : (modSettings[idx]?.toRepak || false),
       forceLegacy: modSettings[idx]?.forceLegacy || false,
-      installSubfolder: selectedFolderId || ''
+      installSubfolder: modSettings[idx]?.installSubfolder || ''
     }))
     onInstall(modsToInstall)
   }
 
-  const handleNewFolder = async () => {
+  const handleNewFolder = async (targetModIdx) => {
     const name = prompt('Enter new folder name:')
     if (!name || !name.trim()) return
 
@@ -243,7 +244,10 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
       if (onCreateFolder) {
         const newFolderId = await onCreateFolder(name.trim())
         if (newFolderId) {
-          setSelectedFolderId(newFolderId)
+          // If a specific mod index was provided, assign the new folder to that mod
+          if (typeof targetModIdx === 'number') {
+            updateModSetting(targetModIdx, 'installSubfolder', newFolderId)
+          }
         }
       }
     } catch (err) {
@@ -498,7 +502,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                           <span>Install to</span>
                           <button
                             className="imp-btn-new-folder"
-                            onClick={handleNewFolder}
+                            onClick={() => handleNewFolder(idx)}
                             disabled={isCreatingFolder}
                             title="Create new folder"
                           >
@@ -510,8 +514,8 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                           {/* Root folder */}
                           {rootFolder && (
                             <div
-                              className={`imp-folder-item root-item ${selectedFolderId === rootFolder.id || selectedFolderId === null ? 'selected' : ''}`}
-                              onClick={() => setSelectedFolderId(rootFolder.id)}
+                              className={`imp-folder-item root-item ${modSettings[idx]?.installSubfolder === rootFolder.id || !modSettings[idx]?.installSubfolder ? 'selected' : ''}`}
+                              onClick={() => updateModSetting(idx, 'installSubfolder', rootFolder.id)}
                             >
                               <span className="folder-icon"><VscFolderOpened /></span>
                               <span className="folder-name">{rootFolder.name}</span>
@@ -524,8 +528,8 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                               <FolderNode
                                 key={node.fullPath || node.id}
                                 node={node}
-                                selectedFolderId={selectedFolderId}
-                                onSelect={setSelectedFolderId}
+                                selectedFolderId={modSettings[idx]?.installSubfolder}
+                                onSelect={(newId) => updateModSetting(idx, 'installSubfolder', newId)}
                               />
                             ))}
                           </div>
