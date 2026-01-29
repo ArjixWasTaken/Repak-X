@@ -20,7 +20,7 @@ mod ip_obfuscation;
 mod toast_events;
 mod discord_presence;
 
-use uasset_detection::{detect_mesh_files_async, detect_texture_files_async, detect_static_mesh_files_async};
+use uasset_detection::detect_texture_files_async;
 use log::{info, warn, error};
 use serde::{Deserialize, Serialize};
 use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
@@ -717,21 +717,9 @@ async fn parse_dropped_files(
                     let remaining = 100usize.saturating_sub(uasset_files_absolute.len());
                     uasset_files_absolute.extend(other_files.into_iter().take(remaining));
                     
-                    let _ = window.emit("install_log", format!("[Detection] Checking {} uasset files for asset types...", uasset_files_absolute.len()));
-                    
-                    // Log first few files for debugging
-                    if !uasset_files_absolute.is_empty() {
-                        let sample_count = uasset_files_absolute.len().min(3);
-                        for (i, file) in uasset_files_absolute.iter().take(sample_count).enumerate() {
-                            let _ = window.emit("install_log", format!("[Detection] Sample file {}: {}", i + 1, file));
-                        }
-                    }
-                    
-                    let has_skeletal_mesh = detect_mesh_files_async(&uasset_files_absolute).await;
-                    let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
-                    
-                    let has_static_mesh = detect_static_mesh_files_async(&uasset_files_absolute).await;
-                    let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
+                    // Only scan for textures - SkeletalMesh and StaticMesh are auto-fixed by ZenConverter
+                    // This significantly speeds up detection by skipping unnecessary UAssetAPI calls
+                    let _ = window.emit("install_log", "[Detection] Checking for textures with .ubulk (mesh fixes are automatic)...");
                     
                     // For texture detection, we need ALL files (including .ubulk) to check for bulk data
                     let all_files_absolute: Vec<String> = all_files.iter()
@@ -740,8 +728,7 @@ async fn parse_dropped_files(
                     let has_texture = detect_texture_files_async(&all_files_absolute).await;
                     let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
                     
-                    let summary = format!("[Detection] Directory results: skeletal={}, static={}, texture={}", 
-                        has_skeletal_mesh, has_static_mesh, has_texture);
+                    let summary = format!("[Detection] Directory results: texture={} (mesh fixes automatic)", has_texture);
                     info!("{}", summary);
                     let _ = window.emit("install_log", &summary);
                     
@@ -750,7 +737,7 @@ async fn parse_dropped_files(
                     let has_uassets = contains_uasset_files(&all_files_absolute);
                     let _ = window.emit("install_log", format!("[Detection] Contains UAssets: {}", has_uassets));
                     
-                    (mod_type, has_texture, has_static_mesh, has_uassets)
+                    (mod_type, has_texture, false, has_uassets)
                 } else {
                     ("Directory".to_string(), false, false, true) // Default to true for safety
                 }
@@ -908,19 +895,8 @@ async fn parse_dropped_files(
                                             let _ = window.emit("install_log", format!("[Detection] Extracted {} uasset files for UAssetAPI", extracted_paths.len()));
                                         }
                                         
-                                        // Use extracted paths for detection (UAssetAPI needs actual files)
-                                        let detection_files = if !extracted_paths.is_empty() {
-                                            extracted_paths.clone()
-                                        } else {
-                                            // Fallback to internal paths (won't work for UAssetAPI but keeps flow)
-                                            files.iter().filter(|f| f.ends_with(".uasset")).cloned().collect()
-                                        };
-                                        
-                                        let has_skeletal_mesh = detect_mesh_files_async(&detection_files).await;
-                                        let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
-                                        
-                                        let has_static_mesh = detect_static_mesh_files_async(&detection_files).await;
-                                        let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
+                                        // Only scan for textures - mesh fixes are automatic in ZenConverter
+                                        let _ = window.emit("install_log", "[Detection] Checking for textures with .ubulk (mesh fixes automatic)...");
                                         
                                         // Texture detection - use extracted files but also check for .ubulk in original file list
                                         let has_ubulk = files.iter().any(|f| f.to_lowercase().ends_with(".ubulk"));
@@ -934,8 +910,7 @@ async fn parse_dropped_files(
                                         };
                                         let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
                                         
-                                        let summary = format!("[Detection] Archive PAK results: skeletal={}, static={}, texture={}", 
-                                            has_skeletal_mesh, has_static_mesh, has_texture);
+                                        let summary = format!("[Detection] Archive PAK results: texture={} (mesh fixes automatic)", has_texture);
                                         info!("{}", summary);
                                         let _ = window.emit("install_log", &summary);
                                         
@@ -952,7 +927,7 @@ async fn parse_dropped_files(
                                             is_dir: false,
                                             path: path_str,
                                             auto_fix_texture: has_texture,
-                                            auto_fix_serialize_size: has_static_mesh,
+                                            auto_fix_serialize_size: false, // Mesh fixes are automatic
                                             auto_to_repak: !is_iostore,  // Don't repak IoStore packages
                                             contains_uassets: has_uassets,
                                         }]);
@@ -989,21 +964,12 @@ async fn parse_dropped_files(
                                     // Get mod type from content
                                     let mod_type = get_current_pak_characteristics(content_files.clone());
                                     
-                                    // Run UAsset detection on the content files
-                                    let _ = window.emit("install_log", "[Detection] Checking for SkeletalMesh assets...");
-                                    let has_skeletal_mesh = detect_mesh_files_async(&content_files).await;
-                                    let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
-                                    
-                                    let _ = window.emit("install_log", "[Detection] Checking for StaticMesh assets...");
-                                    let has_static_mesh = detect_static_mesh_files_async(&content_files).await;
-                                    let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
-                                    
-                                    let _ = window.emit("install_log", "[Detection] Checking for Texture assets with .ubulk...");
+                                    // Only scan for textures - mesh fixes are automatic in ZenConverter
+                                    let _ = window.emit("install_log", "[Detection] Checking for textures with .ubulk (mesh fixes automatic)...");
                                     let has_texture = detect_texture_files_async(&content_files).await;
                                     let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
                                     
-                                    let summary = format!("[Detection] Archive folder results: skeletal={}, static={}, texture={}", 
-                                        has_skeletal_mesh, has_static_mesh, has_texture);
+                                    let summary = format!("[Detection] Archive folder results: texture={} (mesh fixes automatic)", has_texture);
                                     info!("{}", summary);
                                     let _ = window.emit("install_log", &summary);
                                     
@@ -1021,7 +987,7 @@ async fn parse_dropped_files(
                                         is_dir: true,
                                         path: path_str,
                                         auto_fix_texture: has_texture,
-                                        auto_fix_serialize_size: has_static_mesh,
+                                        auto_fix_serialize_size: false, // Mesh fixes are automatic
                                         auto_to_repak: false,
                                         contains_uassets: has_uassets,
                                     }]);
@@ -1127,18 +1093,8 @@ async fn parse_dropped_files(
                                 let _ = window.emit("install_log", format!("[Detection] Extracted {} uasset files for UAssetAPI", extracted_paths.len()));
                             }
                             
-                            // Use extracted paths if available, otherwise fall back to internal paths
-                            let detection_files = if !extracted_paths.is_empty() {
-                                extracted_paths.clone()
-                            } else {
-                                files.iter().filter(|f| f.ends_with(".uasset")).cloned().collect()
-                            };
-                            
-                            let has_skeletal_mesh = detect_mesh_files_async(&detection_files).await;
-                            let _ = window.emit("install_log", format!("[Detection] SkeletalMesh result: {}", has_skeletal_mesh));
-                            
-                            let has_static_mesh = detect_static_mesh_files_async(&detection_files).await;
-                            let _ = window.emit("install_log", format!("[Detection] StaticMesh result: {}", has_static_mesh));
+                            // Only scan for textures - mesh fixes are automatic in ZenConverter
+                            let _ = window.emit("install_log", "[Detection] Checking for textures with .ubulk (mesh fixes automatic)...");
                             
                             // Texture detection - use extracted files but also check for .ubulk in original file list
                             let has_ubulk = files.iter().any(|f| f.to_lowercase().ends_with(".ubulk"));
@@ -1152,8 +1108,7 @@ async fn parse_dropped_files(
                             };
                             let _ = window.emit("install_log", format!("[Detection] Texture result: {}", has_texture));
                             
-                            let summary = format!("[Detection] PAK file results: skeletal={}, static={}, texture={}", 
-                                has_skeletal_mesh, has_static_mesh, has_texture);
+                            let summary = format!("[Detection] PAK file results: texture={} (mesh fixes automatic)", has_texture);
                             info!("{}", summary);
                             let _ = window.emit("install_log", &summary);
                             
@@ -1168,7 +1123,7 @@ async fn parse_dropped_files(
                                 is_dir: false,
                                 path: path_str,
                                 auto_fix_texture: has_texture,
-                                auto_fix_serialize_size: has_static_mesh,
+                                auto_fix_serialize_size: false, // Mesh fixes are automatic
                                 auto_to_repak: !is_iostore,  // Don't repak IoStore packages
                                 contains_uassets: has_uassets,
                             });
