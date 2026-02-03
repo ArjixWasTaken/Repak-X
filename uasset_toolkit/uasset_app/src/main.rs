@@ -1,9 +1,8 @@
 use anyhow::Result;
 use std::io::{self, BufRead};
-use uasset_toolkit::UAssetToolkit;
+use uasset_toolkit::{SyncToolkit, patch_mesh};
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     
     // Try to auto-detect bridge path if not provided
@@ -13,7 +12,7 @@ async fn main() -> Result<()> {
         None
     };
     
-    let toolkit = UAssetToolkit::new(bridge_path)?;
+    let toolkit = SyncToolkit::new(bridge_path)?;
     
     // Determine if we have file arguments
     let file_args: Vec<&String> = if args.len() >= 2 && !args[1].ends_with(".uasset") {
@@ -28,7 +27,7 @@ async fn main() -> Result<()> {
         // Command line mode - process files
         for file_path in file_args {
             println!("Processing: {}", file_path);
-            match toolkit.process_texture_uasset(file_path).await {
+            match toolkit.is_texture_uasset(file_path) {
                 Ok(true) => println!("✓ {} - Texture detected and set to NoMipmaps", file_path),
                 Ok(false) => println!("- {} - Not a texture uasset", file_path),
                 Err(e) => eprintln!("✗ {} - Error: {}", file_path, e),
@@ -64,27 +63,15 @@ async fn main() -> Result<()> {
             
             match parts.as_slice() {
                 ["info", file_path] => {
-                    match toolkit.get_texture_info(file_path).await {
-                        Ok(info) => {
-                            println!("Texture Info for {}:", file_path);
-                            if let Some(mip_gen) = &info.mip_gen_settings {
-                                println!("  MipGenSettings: {}", mip_gen);
-                            }
-                            if let Some(width) = info.width {
-                                println!("  Width: {}", width);
-                            }
-                            if let Some(height) = info.height {
-                                println!("  Height: {}", height);
-                            }
-                            if let Some(format) = &info.format {
-                                println!("  Format: {}", format);
-                            }
+                    match toolkit.is_texture_uasset(file_path) {
+                        Ok(is_texture) => {
+                            println!("File: {} - Is Texture: {}", file_path, is_texture);
                         }
-                        Err(e) => eprintln!("✗ Error getting texture info: {}", e),
+                        Err(e) => eprintln!("✗ Error checking texture: {}", e),
                     }
                 }
                 ["mesh", file_path] => {
-                    match toolkit.is_mesh_uasset(file_path).await {
+                    match toolkit.batch_detect_skeletal_mesh(&[file_path.to_string()]) {
                         Ok(is_mesh) => {
                             if is_mesh {
                                 println!("✓ {} is a mesh uasset", file_path);
@@ -96,34 +83,22 @@ async fn main() -> Result<()> {
                     }
                 }
                 ["mesh-info", file_path] => {
-                    match toolkit.get_mesh_info(file_path).await {
-                        Ok(info) => {
-                            println!("Mesh Info for {}:", file_path);
-                            if let Some(mat_count) = info.material_count {
-                                println!("  Material Count: {}", mat_count);
-                            }
-                            if let Some(vert_count) = info.vertex_count {
-                                println!("  Vertex Count: {}", vert_count);
-                            }
-                            if let Some(tri_count) = info.triangle_count {
-                                println!("  Triangle Count: {}", tri_count);
-                            }
-                            if let Some(is_skeletal) = info.is_skeletal_mesh {
-                                println!("  Is Skeletal Mesh: {}", is_skeletal);
-                            }
+                    match toolkit.batch_detect_skeletal_mesh(&[file_path.to_string()]) {
+                        Ok(is_skeletal) => {
+                            println!("File: {} - Is Skeletal Mesh: {}", file_path, is_skeletal);
                         }
-                        Err(e) => eprintln!("✗ Error getting mesh info: {}", e),
+                        Err(e) => eprintln!("✗ Error checking mesh: {}", e),
                     }
                 }
                 ["patch-mesh", uasset_path, uexp_path] => {
-                    match toolkit.patch_mesh(uasset_path, uexp_path).await {
+                    match patch_mesh(uasset_path, uexp_path) {
                         Ok(()) => println!("✓ Successfully patched mesh: {}", uasset_path),
                         Err(e) => eprintln!("✗ Error patching mesh: {}", e),
                     }
                 }
                 _ => {
                     // Treat as file path
-                    match toolkit.process_texture_uasset(line).await {
+                    match toolkit.is_texture_uasset(line) {
                         Ok(true) => println!("✓ {} - Texture detected and set to NoMipmaps", line),
                         Ok(false) => println!("- {} - Not a texture uasset", line),
                         Err(e) => eprintln!("✗ {} - Error: {}", line, e),

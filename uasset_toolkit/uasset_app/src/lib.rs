@@ -520,24 +520,65 @@ pub fn is_static_mesh_uasset(file_path: &str) -> Result<bool> {
     toolkit.batch_detect_static_mesh(&[file_path.to_string()])
 }
 
-/// Recompress an IoStore file (stub - returns error for now)
-pub fn recompress_iostore(_file_path: &str) -> Result<()> {
-    anyhow::bail!("recompress_iostore not yet implemented in sync toolkit")
+/// Recompress an IoStore file
+pub fn recompress_iostore(file_path: &str) -> Result<()> {
+    let toolkit = get_global_toolkit()?;
+    let request = UAssetRequest::RecompressIoStore {
+        file_path: file_path.to_string(),
+    };
+    let response = toolkit.send_request(&request)?;
+    if !response.success {
+        anyhow::bail!("Failed to recompress IoStore: {}", response.message);
+    }
+    Ok(())
 }
 
-/// Extract files from an IoStore (stub - returns error for now)  
-pub fn extract_iostore(_file_path: &str, _output_path: &str, _aes_key: Option<&str>) -> Result<usize> {
-    anyhow::bail!("extract_iostore not yet implemented in sync toolkit")
+/// Extract files from an IoStore to legacy format
+pub fn extract_iostore(file_path: &str, output_path: &str, aes_key: Option<&str>) -> Result<usize> {
+    let toolkit = get_global_toolkit()?;
+    let request = UAssetRequest::ExtractIoStore {
+        file_path: file_path.to_string(),
+        output_path: output_path.to_string(),
+        aes_key: aes_key.map(|s| s.to_string()),
+    };
+    let response = toolkit.send_request(&request)?;
+    if !response.success {
+        anyhow::bail!("Failed to extract IoStore: {}", response.message);
+    }
+    let data = response.data.unwrap_or(serde_json::json!({}));
+    let converted = data.get("converted_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    Ok(converted)
 }
 
-/// Extract script objects (stub - returns error for now)
-pub fn extract_script_objects(_pak_path: &str, _output_path: &str) -> Result<usize> {
-    anyhow::bail!("extract_script_objects not yet implemented in sync toolkit")
+/// Extract script objects from an IoStore
+pub fn extract_script_objects(file_path: &str, output_path: &str) -> Result<usize> {
+    let toolkit = get_global_toolkit()?;
+    let request = UAssetRequest::ExtractScriptObjects {
+        file_path: file_path.to_string(),
+        output_path: output_path.to_string(),
+    };
+    let response = toolkit.send_request(&request)?;
+    if !response.success {
+        anyhow::bail!("Failed to extract script objects: {}", response.message);
+    }
+    let data = response.data.unwrap_or(serde_json::json!({}));
+    let count = data.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+    Ok(count)
 }
 
-/// Check if IoStore is compressed (stub - returns error for now)
-pub fn is_iostore_compressed(_file_path: &str) -> Result<bool> {
-    anyhow::bail!("is_iostore_compressed not yet implemented in sync toolkit")
+/// Check if IoStore is compressed
+pub fn is_iostore_compressed(file_path: &str) -> Result<bool> {
+    let toolkit = get_global_toolkit()?;
+    let request = UAssetRequest::IsIoStoreCompressed {
+        file_path: file_path.to_string(),
+    };
+    let response = toolkit.send_request(&request)?;
+    if !response.success {
+        anyhow::bail!("Failed to check IoStore compression: {}", response.message);
+    }
+    let data = response.data.unwrap_or(serde_json::json!({}));
+    let compressed = data.get("compressed").and_then(|v| v.as_bool()).unwrap_or(false);
+    Ok(compressed)
 }
 
 /// IoStore creation result
@@ -565,9 +606,18 @@ pub fn create_mod_iostore(
     toolkit.create_mod_iostore(output_path, input_dir, usmap_path, mount_point, compress, aes_key, parallel)
 }
 
-/// Patch mesh materials (stub - returns error for now)
-pub fn patch_mesh(_file_path: &str, _uexp_path: &str) -> Result<()> {
-    anyhow::bail!("patch_mesh not yet implemented in sync toolkit")
+/// Patch mesh materials
+pub fn patch_mesh(file_path: &str, uexp_path: &str) -> Result<()> {
+    let toolkit = get_global_toolkit()?;
+    let request = UAssetRequest::PatchMesh {
+        file_path: file_path.to_string(),
+        uexp_path: uexp_path.to_string(),
+    };
+    let response = toolkit.send_request(&request)?;
+    if !response.success {
+        anyhow::bail!("Failed to patch mesh: {}", response.message);
+    }
+    Ok(())
 }
 
 /// List files in IoStore

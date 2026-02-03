@@ -119,7 +119,7 @@ try {
     if (Test-Path $toolDir) {
         $destToolDir = Join-Path $distDir "uassettool"
         New-Item -ItemType Directory -Force -Path $destToolDir | Out-Null
-        Copy-Item -Path (Join-Path $toolDir "*") -Destination $destToolDir -Recurse -Force -Exclude "*.pdb"
+        Copy-Item -Path (Join-Path $toolDir "*") -Destination $destToolDir -Recurse -Force -Exclude "*.pdb", "ue4-dds-tools"
         Write-Success "Copied UAssetTool"
     }
     else {

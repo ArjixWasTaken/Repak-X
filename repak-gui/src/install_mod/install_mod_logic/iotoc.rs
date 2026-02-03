@@ -113,6 +113,17 @@ pub fn convert_to_iostore_directory(
         } else {
             info!("Found {} textures with .ubulk files - batch processing (parallel={})", texture_paths.len(), pak.parallel_processing);
             
+            // Log USMAP_PATH status for debugging
+            match std::env::var("USMAP_PATH") {
+                Ok(usmap) => info!("[Texture] USMAP_PATH is set: {}", usmap),
+                Err(_) => warn!("[Texture] USMAP_PATH is NOT set - texture parsing may fail!"),
+            }
+            
+            // Log first few texture paths for debugging
+            for (i, path) in texture_paths.iter().take(3).enumerate() {
+                info!("[Texture] File {}: {}", i + 1, path.display());
+            }
+            
             // Use batch processing for all textures at once with parallel option
             match batch_convert_textures_to_inline_with_parallel(&texture_paths, pak.parallel_processing) {
                 Ok((success_count, skip_count, error_count, processed_names)) => {
