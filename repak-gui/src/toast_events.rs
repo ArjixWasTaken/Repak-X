@@ -176,6 +176,14 @@ pub fn emit_folder_delete_failed(window: &Window, error: &str) {
     ));
 }
 
+/// Emit folder rename failed error
+pub fn emit_folder_rename_failed(window: &Window, error: &str) {
+    emit_toast(window, ToastPayload::error(
+        "Rename Failed",
+        format!("Could not rename folder: {}", error)
+    ));
+}
+
 /// Emit mod move failed error
 pub fn emit_move_failed(window: &Window, error: &str) {
     emit_toast(window, ToastPayload::error(

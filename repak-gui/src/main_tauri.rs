@@ -2585,6 +2585,103 @@ async fn delete_folder(id: String, state: State<'_, Arc<Mutex<AppState>>>, windo
 }
 
 #[tauri::command]
+async fn rename_folder(
+    id: String,
+    new_name: String,
+    state: State<'_, Arc<Mutex<AppState>>>,
+    window: Window,
+) -> Result<String, String> {
+    let mut state = state.lock().unwrap();
+    let game_path = state.game_path.clone();
+
+    // Prevent renaming root folder
+    if id == game_path.file_name().and_then(|n| n.to_str()).unwrap_or("") {
+        let error_msg = "Cannot rename the root folder".to_string();
+        toast_events::emit_folder_rename_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
+
+    // Validate new name (no path separators allowed in the leaf name)
+    if new_name.contains('/') || new_name.contains('\\') || new_name.is_empty() {
+        let error_msg = "Invalid folder name".to_string();
+        toast_events::emit_folder_rename_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
+
+    let old_path = game_path.join(&id);
+    if !old_path.exists() {
+        let error_msg = "Folder does not exist".to_string();
+        toast_events::emit_folder_rename_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
+
+    // Build new path: replace only the last path segment with new_name
+    let new_id = if let Some(parent) = std::path::Path::new(&id).parent() {
+        let parent_str = parent.to_string_lossy().replace('\\', "/");
+        if parent_str.is_empty() {
+            new_name.clone()
+        } else {
+            format!("{}/{}", parent_str, new_name)
+        }
+    } else {
+        new_name.clone()
+    };
+
+    let new_path = game_path.join(&new_id);
+
+    if new_path.exists() {
+        let error_msg = format!("A folder named \"{}\" already exists", new_name);
+        toast_events::emit_folder_rename_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
+
+    // Rename the physical directory
+    if let Err(e) = std::fs::rename(&old_path, &new_path) {
+        let error_msg = format!("Failed to rename folder: {}", e);
+        toast_events::emit_folder_rename_failed(&window, &error_msg);
+        return Err(error_msg);
+    }
+
+    // Update mod_metadata entries that reference the old folder ID (or children of it)
+    let old_prefix = format!("{}/", id);
+    for metadata in state.mod_metadata.iter_mut() {
+        if let Some(ref fid) = metadata.folder_id {
+            if fid == &id {
+                metadata.folder_id = Some(new_id.clone());
+            } else if fid.starts_with(&old_prefix) {
+                // Child folder: replace the old prefix with the new one
+                let suffix = &fid[old_prefix.len()..];
+                metadata.folder_id = Some(format!("{}/{}", new_id, suffix));
+            }
+        }
+    }
+
+    // Update folder state entries that reference the old ID
+    for folder in state.folders.iter_mut() {
+        if folder.id == id {
+            folder.id = new_id.clone();
+            folder.name = new_name.clone();
+        } else if folder.id.starts_with(&old_prefix) {
+            let suffix = &folder.id[old_prefix.len()..];
+            folder.id = format!("{}/{}", new_id, suffix);
+        }
+        // Update parent_id references
+        if let Some(ref pid) = folder.parent_id {
+            if pid == &id {
+                folder.parent_id = Some(new_id.clone());
+            } else if pid.starts_with(&old_prefix) {
+                let suffix = &pid[old_prefix.len()..];
+                folder.parent_id = Some(format!("{}/{}", new_id, suffix));
+            }
+        }
+    }
+
+    save_state(&state).map_err(|e| e.to_string())?;
+
+    Ok(new_id)
+}
+
+#[tauri::command]
 async fn assign_mod_to_folder(
     mod_path: String,
     folder_id: Option<String>,
@@ -5733,6 +5830,7 @@ fn main() {
             get_root_folder_info,
             update_folder,
             delete_folder,
+            rename_folder,
             assign_mod_to_folder,
             add_custom_tag,
             remove_custom_tag,
