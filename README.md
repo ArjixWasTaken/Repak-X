@@ -1,85 +1,106 @@
-# RepakX (Marvel Rivals)
+<div align="center">
 
-RepakX is a Windows application for installing and repacking Marvel Rivals mods. It automates UE IOStore packaging, applies mesh fixes during repack, and intelligently handles compression so your installed mods load and stay small.
- 
-## Overview
+<img src="repak-gui/icons/RepakIcon.png" alt="Repak X" width="120" />
+<br/>
+<img src="repak-gui/src/assets/extra/repakx-title-loop.gif" alt="Repak X" height="60" />
 
-RepakX focuses on one job: taking Marvel Rivals `.pak` mods and turning them into game-ready IOStore assets with minimal manual work.
+### The Definitive Marvel Rivals Mod Installer & Manager
 
-At a high level it:
-- Extracts the original `.pak` mod.
-- Applies mesh fixes where needed.
-- Rebuilds the mod as UE5.3 IOStore (`.utoc` / `.ucas` + a small companion `.pak`).
-- Uses Oodle compression intelligently so files stay small but still load correctly.
+A next-gen desktop app to install, organize, and share mods — built with Tauri, React, Rust, and C#.
 
-## Main Components
+[![GitHub release](https://img.shields.io/github/v/release/XzantGaming/Repak-X?style=for-the-badge&color=7c3aed&label=Latest)](https://github.com/XzantGaming/Repak-X/releases)
+[![Downloads](https://img.shields.io/github/downloads/XzantGaming/Repak-X/total?style=for-the-badge&color=0ea5e9&label=Downloads)](https://github.com/XzantGaming/Repak-X/releases)
+[![Stars](https://img.shields.io/github/stars/XzantGaming/Repak-X?style=for-the-badge&color=f59e0b)](https://github.com/XzantGaming/Repak-X)
+<br/>
+[![License](https://img.shields.io/github/license/XzantGaming/Repak-X?style=for-the-badge&color=10b981)](LICENSE-MIT)
+[![Last Commit](https://img.shields.io/github/last-commit/XzantGaming/Repak-X?style=for-the-badge&color=6366f1)](https://github.com/XzantGaming/Repak-X/commits)
 
-- **Tauri desktop app (Rust + React GUI)**  
-  The main application you run as `RepakX.exe`. Provides the drag-and-drop interface and orchestrates all work.
+---
 
-- **Rust backend**  
-  Handles pak unpacking/packing, IOStore building, and communication with UAsset tools.
+</div>
 
-- **C# helper tools**  
-  - `UAssetBridge.exe` – optional texture processing and conversions (Very experimental at the moment and the patch doesnt properly apply ingame yet).  
-  - `UAssetMeshFixer.exe` – mesh fixups applied during repack.
 
-- **UAsset / IOStore logic**  
-  Re-uses and extends existing crates to safely read, modify and rebuild UE assets for Marvel Rivals.
+## ⚡ Key Features
 
-End users normally interact only with the GUI; the backend and helper tools run automatically.
+<table>
+<tr>
+<td width="50%" valign="top">
 
-## Requirements
+### ⚙️ Core
 
-- Windows x64
-- Marvel Rivals (UE5.3)
-- Game-provided Oodle available at runtime (standard for the game)
+- **Install** paks and uassets into **Legacy** and **IoStore** bundles from folder drops, paks, and archives
+- **Install Panel with Per-Mod Settings** — custom name, tags, folder destination, compression, Legacy PAK vs IoStore toggle, and Repak toggle per mod
+- **Multiple Mod Installations** — install several mods at once
+- **Organize** pre-packaged mods — quickly manage pre-made IoStore bundles
+- **Global Clash Detection** — resolve mod conflicts with priority selector system
+- **Mod Detection API** — auto-detects character, category, mod type, and package type
+- **Game Integration** — smart crash detection, Steam launch, and mods operations lockdown when game is running
+- **Oodle Compression** — applied to IoStore bundles to keep your drive happy
+- **Mod Sharing** — AES-256 encrypted modpack sharing across the globe
+- **Parallel Processing Mode** — toggle between Normal (50%) and Boost (75%) thread usage for faster mod installations
+- **Extract Assets** — extract all assets to a chosen folder from a mod bundle
+- **Browser Extension Install** — receive NexusMods mods from the Repak X browser extension
+- **Proper Formatting** of Marvel Rivals proprietary asset formats (Skeletal Mesh, Static Mesh, StringTable)
+- **Utility Tools** — Skip Launcher Patch, Character Database, ReCompress, LOD Disabler shortcut
+- **Auto-Update Checker** — automatically checks and applies new app versions
+- **MaterialTag Injection** — MaterialTag containers injected through the packing process <sub>(needs the MaterialTag UE Plugin to create a compatible mod)</sub>
 
-## Installation
+</td>
+<td width="50%" valign="top">
 
-1. Download a prebuilt ZIP from the **Releases** page.
-2. Extract it to any writable folder (avoid `Program Files` to keep permissions simple).
-3. Run `RepakX.exe`.
+### 🎨 UI & Experience
 
-## Basic Usage
+- **Drag & Drop Zone** — intuitive drag & drop for mod installation and organization
+- **Split-Button File Picker** — quickly pick files or folders to install
+- **Filtering & Search** — search bar, hero filtering, categories, tags, and folder managing
+- **Multiple View Modes** — switch between cards or list for your mods
+- **Mod Details Panel** — with built-in Asset Tree browser
+- **Bulk Operations** — multi-selection for batch actions
+- **Progress Tracking** — install progress and detailed install logs
+- **Update / Replace** — swap out mods quickly
+- **Dark / Light Theming** — with accent color set
+- **Hero Icons & Labels** — pulled from an always-up-to-date game database
+- **Keyboard Shortcuts** — for power users
+- **Onboarding Tour** — guided walkthrough for new users
+- **Responsive Layout** — adapts to any window size
+- **Context Menus** — right-click actions for quick mod operations
+- **Quick Utilities** — copy path for assets and mods, open in explorer
+- **Toast Notification System** — success, error, warning, info, and detailed crash alerts
+- **Discord Rich Presence** — show off what you're modding
 
-1. Drag a `.pak` mod into the GUI.
-2. Choose **Repack / Install**.
-3. The app will:
-   - Unpack the mod
-   - Apply mesh fixes
-   - Rebuild it as IOStore with appropriate compression
-4. The final files are written to your Marvel Rivals `Paks/~mods` folder, typically as:
-   - `<stem>_9999999_P.utoc`
-   - `<stem>_9999999_P.ucas`
-   - `<stem>_9999999_P.pak` (small, uncompressed companion)
+</td>
+</tr>
+</table>
 
-Use the `_9999999_P` (The App will autocomplete it for you if its missing but if you want to be extra safe do the suffix manually) suffix so the game prioritizes your mod over base content.
+<br/>
 
-## How It Works (Short Version)
+---
 
-- Rebuilds mods targeting **UE 5.3 IOStore** format.
-- Uses **Oodle compression** on data that benefits from it, leaving required headers uncompressed.
-- Provides a short compression summary in logs so you can verify that data packed as expected.
-- Tries to be robust against malformed or unusual assets to reduce crash risk.
+## 🚀 Getting Started
 
-## Troubleshooting
+### Download
 
-- **Textures look wrong or warnings mention `UAssetBridge.exe`**  
-  Add `uassetbridge/UAssetBridge.exe` next to `RepakX.exe` to enable the full texture pipeline.(Experimental. Being worked on proper function)
+Grab the build from [**Releases**](https://github.com/XzantGaming/Repak-X/releases).
 
-- **Mod not loading or game issues**  
-  Double-check that the output files are in the correct `Paks/~mods` folder and use the `_9999999_P` suffix.  
-  If problems persist, open an issue and include the log file and mod name.
+### Help and Support
 
-## Development
+Join the **[Repak X Discord Server](https://discord.gg/repak-x)** for support and connect with the team.
 
-The project is a Tauri (Rust) + React app with C# helper tools. For building from source, scripts such as `build_contributor.ps1` and `build_app.ps1` orchestrate the full pipeline.
+<br/>
 
-## Acknowledgements
+## 🙏 Acknowledgements
 
-- [unpak](https://github.com/bananaturtlesandwich/unpak): original crate featuring read-only pak operations
-- [rust-u4pak](https://github.com/panzi/rust-u4pak)'s README detailing the pak file layout
-- [jieyouxu](https://github.com/jieyouxu) for serialization implementation of the significantly more complex V11 index
-- [repak](https://github.com/trumank/repak) for the original repak implementation
-- [repak-rivals](https://github.com/natimerry/repak-rivals) by @natimerry, the original fork point and an important early reference
+This project has been made possible by the following projects:
+
+- Powered by **[UAssetToolRivals](https://github.com/XzantGaming/UAssetToolRivals)**
+- **[repak-rivals](https://github.com/natimerry/repak-rivals)** by Natimerry — the initial inspiration for this project
+
+<br/>
+
+## 📜 License
+
+Licensed under [MIT](LICENSE-MIT).
+
+---
+
+<sub>Made with ❤️ for the [Marvel Rivals modding community](https://discord.gg/marvelrivalsmodding)</sub>
