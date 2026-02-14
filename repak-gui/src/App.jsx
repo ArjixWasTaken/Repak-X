@@ -115,6 +115,9 @@ function App() {
 
   // Helper to open/close a specific panel
   const setPanel = (panelName, isOpen) => {
+    if (panelName === 'clash' && !isOpen) {
+      clashScopeModPath.current = null
+    }
     setPanels(prev => ({ ...prev, [panelName]: isOpen }));
   };
 
@@ -196,6 +199,7 @@ function App() {
   const gameRunningRef = useRef(false)
   const lastSelectedModIndex = useRef(null) // For Shift+click range selection
   const filteredModsRef = useRef([]) // Keep in sync with filteredMods for selection handler
+  const clashScopeModPath = useRef(null) // Track single-mod conflict scope path
 
   // Bulk delete state
   const [isDeletingBulk, setIsDeletingBulk] = useState(false)
@@ -334,6 +338,7 @@ function App() {
   const handleCheckClashes = async () => {
     try {
       setStatus('Checking for clashes...')
+      clashScopeModPath.current = null
       const result = await invoke('check_mod_clashes')
       setClashes(result)
       setPanel('clash', true)
@@ -410,6 +415,7 @@ function App() {
   const handleCheckSingleModClashes = async (mod) => {
     try {
       setStatus(`Checking conflicts for ${mod.customName || mod.mod_name || 'mod'}...`)
+      clashScopeModPath.current = mod.path
       const conflicts = await invoke('check_single_mod_conflicts', { modPath: mod.path })
 
       // Transform SingleModConflict objects to ModClash format for the ClashPanel
@@ -467,8 +473,26 @@ function App() {
 
       // Refresh clash list if panel is open
       if (panels.clash) {
-        const result = await invoke('check_mod_clashes')
-        setClashes(result)
+        if (clashScopeModPath.current) {
+          // Single-mod conflict scope: find the mod after priority rename by matching clean base name
+          // Strip priority suffixes to get stable base: remove leading "!", trailing "_P", trailing "_999..."
+          const getCleanBase = (filePath) => {
+            let stem = filePath.split(/[/\\]/).pop().replace(/\.[^.]+$/, '')
+            stem = stem.replace(/^!/, '')
+            stem = stem.replace(/_P$/, '')
+            stem = stem.replace(/_9+$/, '')
+            return stem
+          }
+          const scopeBase = getCleanBase(clashScopeModPath.current)
+          const freshMods = await invoke('get_pak_files')
+          const scopeMod = freshMods.find(m => getCleanBase(m.path) === scopeBase)
+          if (scopeMod) {
+            await handleCheckSingleModClashes(scopeMod)
+          }
+        } else {
+          const result = await invoke('check_mod_clashes')
+          setClashes(result)
+        }
       }
     } catch (error) {
       setStatus('Error setting priority: ' + error)

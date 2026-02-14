@@ -193,7 +193,7 @@ try {
     Write-Info "Building Tauri application (includes frontend build via beforeBuildCommand)..."
     Push-Location $frontendDir
 
-    $tauriArgs = @("build")
+    $tauriArgs = @("build", "--no-bundle")
     if ($Configuration -eq "debug") {
         $tauriArgs += "--debug"
     }
@@ -215,7 +215,7 @@ try {
     # Tell build.rs to skip building UAssetTool
     $env:SKIP_UASSET_TOOL_BUILD = "1"
 
-    & npx tauri $tauriArgs
+    & npx tauri @tauriArgs
     $tauriExitCode = $LASTEXITCODE
 
     # Clean up env var
