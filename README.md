@@ -80,7 +80,7 @@ A next-gen desktop app to install, organize, and share mods — built with Tauri
 
 ### Download
 
-Grab the build from [**Releases**](https://github.com/XzantGaming/Repak-X/releases).
+Grab the latest build from [**Releases**](https://github.com/XzantGaming/Repak-X/releases).
 
 ### Help and Support
 
@@ -100,6 +100,8 @@ This project has been made possible by the following projects:
 ## 📜 License
 
 Licensed under [MIT](LICENSE-MIT).
+
+<sub>All Marvel Rivals game assets used in this project are property of Marvel and NetEase. This project is not affiliated with Marvel or NetEase in any way and is not used for profit.</sub>
 
 ---
 
