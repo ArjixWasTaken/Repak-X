@@ -166,8 +166,8 @@ try {
     # ============================================
     Write-Info "Copying optional assets..."
     $optionalDirs = @(
-        (Join-Path $workspaceRoot "repak-gui\fonts"),
-        (Join-Path $workspaceRoot "repak-gui\palettes")
+        (Join-Path $workspaceRoot "repak-x\fonts"),
+        (Join-Path $workspaceRoot "repak-x\palettes")
     )
     foreach ($dir in $optionalDirs) {
         if (Test-Path $dir) {

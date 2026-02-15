@@ -50,13 +50,13 @@ jobs:
       - name: Cache Node.js modules
         uses: actions/cache@v4
         with:
-          path: repak-gui/node_modules
-          key: ${{ runner.os }}-node-${{ hashFiles('repak-gui/package-lock.json') }}
+          path: repak-x/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('repak-x/package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-node-
 
       - name: Install Frontend Dependencies
-        working-directory: repak-gui
+        working-directory: repak-x
         run: npm install
 
       - name: Cache Cargo Registry
@@ -75,9 +75,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: target/
-          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'repak-gui/tauri.conf.json', 'repak-gui/package.json') }}-${{ hashFiles('**/*.rs') }}
+          key: ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'repak-x/tauri.conf.json', 'repak-x/package.json') }}-${{ hashFiles('**/*.rs') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'repak-gui/tauri.conf.json', 'repak-gui/package.json') }}-
+            ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'repak-x/tauri.conf.json', 'repak-x/package.json') }}-
             ${{ runner.os }}-cargo-target-
 
       - name: Install sccache

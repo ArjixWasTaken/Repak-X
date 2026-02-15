@@ -162,7 +162,7 @@ try {
     # ============================================
     Write-Step "[3/4] Installing Frontend Dependencies"
     
-    $frontendDir = Join-Path $workspaceRoot "repak-gui"
+    $frontendDir = Join-Path $workspaceRoot "repak-x"
     if (Test-Path $frontendDir) {
         Push-Location $frontendDir
         
