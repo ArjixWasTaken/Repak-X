@@ -188,7 +188,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v${{ steps.version.outputs.VERSION }}
-          name: Repak GUI Revamped v${{ steps.version.outputs.VERSION }}
+          name: Repak X v${{ steps.version.outputs.VERSION }}
           draft: false
           prerelease: false
           generate_release_notes: true
