@@ -1,8 +1,8 @@
 <div align="center">
 
-<img src="repak-gui/icons/RepakIcon.png" alt="Repak X" width="120" />
+<img src="repak-x/icons/RepakIcon.png" alt="Repak X" width="120" />
 <br/>
-<img src="repak-gui/src/assets/extra/repakx-title-loop.gif" alt="Repak X" height="60" />
+<img src="repak-x/src/assets/extra/repakx-title-loop.gif" alt="Repak X" height="60" />
 
 ### The Definitive Marvel Rivals Mod Installer & Manager
 
