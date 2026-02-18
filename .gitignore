@@ -2,26 +2,25 @@
 node_modules/
 target/
 dist/
-repak-gui/node_modules/
-repak-gui/target/
-repak-gui/dist/
+website/build/
+website/.docusaurus/
+website/.cache-loader/
+repak-x/node_modules/
+repak-x/target/
+repak-x/dist/
 
 # IDE/Editor folders
-repak-gui/.agent/
-repak-gui/.agents/
-repak-gui/.windsurf/
-.vscode/
-.idea/
+repak-x/.agent/
+repak-x/.agents/
+repak-x/.windsurf/
 
-# Documentation (generated)
-docs/
+# Documentation (root-level only)
+/docs/
 
 # UAssetTool C# build artifacts (submodule has its own .gitignore)
 # These are legacy paths that may still exist
 UAssetAPI/UAssetAPI/bin/
 UAssetAPI/UAssetAPI/obj/
-UAssetAPI/StaticMeshSerializeSizeFixer/obj/
-UAssetAPI/StaticMeshSerializeSizeFixer/bin/
 uasset_toolkit/tools/UAssetBridge/bin/
 uasset_toolkit/tools/UAssetBridge/obj/
 uasset_toolkit/tools/UAssetTool/bin/

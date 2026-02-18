@@ -3,7 +3,7 @@ import { open as openUrl } from '@tauri-apps/plugin-shell';
 import repakIcon from '../assets/app-icons/RepakIcon-x256.png';
 
 const GUILD_ID = '1448416689640181862';
-const INVITE_URL = 'https://discord.gg/placeholder';
+const INVITE_URL = 'https://discord.gg/nrud2gjUJk';
 
 type DiscordWidgetData = {
   presence_count?: number;

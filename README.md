@@ -33,7 +33,7 @@ A next-gen Windows app to install, organize, and share mods — built with Tauri
 - **Multiple Mod Installations** — install several mods at once
 - **Organize** pre-packaged mods — quickly manage pre-made IO Store bundles
 - **Global Clash Detection** — resolve mod conflicts with priority selector system
-- **Mod Obfuscation/Encryption** — protect your mods with AES-256 encryption and asset obfuscation, blocking FModel extraction
+- **Mod Obfuscation/Encryption** — protect your mods with AES-256 encryption and asset obfuscation, blocking extraction tools
 - **Mod Detection API** — auto-detects character, category, mod type, and package type
 - **Game Integration** — smart crash detection, Steam launch, and mods operations lockdown when game is running
 - **Oodle Compression** — applied to IO Store bundles to keep your drive happy
@@ -81,11 +81,11 @@ A next-gen Windows app to install, organize, and share mods — built with Tauri
 
 ### Download
 
-Grab the latest build from [**Releases**](https://github.com/XzantGaming/Repak-X/releases).
+Grab the latest build from [**Releases**](https://github.com/XzantGaming/Repak-X/releases/latest).
 
 ### Help and Support
 
-Join the **[Repak X Discord Server](https://discord.gg/repak-x)** for support and connect with the team.
+Join the **[Repak X Discord Server](https://discord.gg/nrud2gjUJk)** for support and connect with the team.
 
 <br/>
 
