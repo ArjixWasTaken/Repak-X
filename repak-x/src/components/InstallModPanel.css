@@ -16,7 +16,6 @@
   background: var(--panel-bg);
   border-radius: 8px;
   width: 90%;
-  max-width: 1200px;
   max-height: 90vh;
   display: flex;
   flex-direction: column;
@@ -195,7 +194,7 @@
   flex-direction: row;
   box-shadow: 0 18px 28px rgba(0, 0, 0, 0.35);
   overflow: hidden;
-  max-height: 305px;
+  max-height: 310px;
 }
 
 /* Left side of card - mod options */
@@ -292,7 +291,7 @@
 .install-toggle {
   display: inline-flex;
   align-items: center;
-  padding: 0.2rem 0.25rem;
+  padding: 0.4rem 1rem 0.4rem 0.4rem;
   border-radius: 12px;
   transition: background 0.2s ease;
 }
@@ -333,16 +332,60 @@
 .install-mod-card__footer {
   display: flex;
   flex-wrap: wrap;
-  gap: 1rem;
-  justify-content: flex-end;
+  gap: 0.5rem;
+  justify-content: space-evenly;
   align-items: center;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   padding-top: 0.75rem;
 }
 
+/* Send to Repak Toggle Styling */
+.repak-toggle {
+  background: color-mix(in srgb, var(--accent-primary), transparent 92%);
+  border: 1px solid color-mix(in srgb, var(--accent-primary), transparent 80%);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.repak-toggle:hover {
+  background: color-mix(in srgb, var(--accent-primary), transparent 88%);
+  border-color: color-mix(in srgb, var(--accent-primary), transparent 70%);
+}
+
+.repak-toggle.active {
+  background: color-mix(in srgb, var(--accent-primary), transparent 85%);
+  border-color: color-mix(in srgb, var(--accent-primary), transparent 60%);
+}
+
+.repak-toggle .install-toggle__label {
+  color: var(--accent-primary);
+}
+
 .repak-toggle.locked {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Obfuscation Toggle Styling */
+.obfuscate-toggle {
+  background: rgba(66, 165, 245, 0.08);
+  border: 1px solid rgba(66, 165, 245, 0.2);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.obfuscate-toggle:hover {
+  background: rgba(66, 165, 245, 0.12);
+  border-color: rgba(66, 165, 245, 0.3);
+}
+
+.obfuscate-toggle.active {
+  background: rgba(66, 165, 245, 0.15);
+  border-color: rgba(66, 165, 245, 0.4);
+}
+
+.obfuscate-toggle .install-toggle__label {
+  color: #42a5f5;
 }
 
 /* Legacy PAK Toggle Styling */
@@ -436,7 +479,7 @@
   display: flex;
   gap: 1rem;
   padding: 1rem 1.5rem;
-  border-top: 1px solid #3a3a3a;
+  border-top: 1px solid var(--panel-border);
   justify-content: flex-end;
 }
 
@@ -458,9 +501,9 @@
 
 .btn-cancel {
   padding: 0.75rem 2rem;
-  background: #3a3a3a;
-  color: #e0e0e0;
-  border: none;
+  background: var(--bg-darkest);
+  color: var(--text-primary);
+  border: 1px solid var(--panel-border);
   border-radius: 4px;
   font-size: 1rem;
   cursor: pointer;
@@ -468,7 +511,7 @@
 }
 
 .btn-cancel:hover {
-  background: #4a4a4a;
+  background: var(--bg-dark);
 }
 
 .log-viewer {
@@ -615,7 +658,7 @@
 /* Folder Tree Container */
 .imp-folder-tree-container {
   flex: 1;
-  background: var(--bg-dark, #1a1a1a);
+  background: var(--bg-darkest);
   border-radius: 8px;
   padding: 0.4rem;
   overflow-y: auto;

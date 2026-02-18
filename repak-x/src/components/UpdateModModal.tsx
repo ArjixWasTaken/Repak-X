@@ -1,7 +1,9 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { invoke } from '@tauri-apps/api/core'
 import { FaExchangeAlt } from 'react-icons/fa'
 import { IoWarningOutline } from 'react-icons/io5'
+import Switch from './ui/Switch'
 import './UpdateModModal.css'
 
 type ModRecord = {
@@ -15,10 +17,31 @@ type UpdateModModalProps = {
     onConfirm: (preserveName: boolean) => void
     oldMod: ModRecord | null
     newSourcePath: string | null
+    initialObfuscate?: boolean | null
 }
 
-export default function UpdateModModal({ isOpen, onClose, onConfirm, oldMod, newSourcePath }: UpdateModModalProps) {
+export default function UpdateModModal({ isOpen, onClose, onConfirm, oldMod, newSourcePath, initialObfuscate }: UpdateModModalProps) {
     const [preserveName, setPreserveName] = useState(true)
+    const [obfuscate, setObfuscate] = useState(false)
+
+    useEffect(() => {
+        if (isOpen) {
+            if (typeof initialObfuscate === 'boolean') {
+                console.debug('[UpdateModModal] Applying initial obfuscate value from transition flow', {
+                    value: initialObfuscate
+                })
+                setObfuscate(initialObfuscate)
+                return
+            }
+
+            console.debug('[UpdateModModal] No initial obfuscate provided, reading from backend')
+            invoke('get_obfuscate')
+                .then((val) => setObfuscate(val as boolean))
+                .catch((error) => {
+                    console.error('[UpdateModModal] Failed to fetch obfuscate preference:', error)
+                })
+        }
+    }, [isOpen, initialObfuscate])
 
     if (!isOpen || !oldMod) return null
 
@@ -69,6 +92,31 @@ export default function UpdateModModal({ isOpen, onClose, onConfirm, oldMod, new
                                 </div>
                             </div>
 
+                            <div className="update-obfuscation-toggle">
+                                <Switch
+                                    size="md"
+                                    color="primary"
+                                    checked={obfuscate}
+                                    onChange={async (value) => {
+                                        try {
+                                            await invoke('set_obfuscate', { enabled: value })
+                                            setObfuscate(value)
+                                        } catch (e) {
+                                            console.error('Failed to set obfuscation:', e)
+                                        }
+                                    }}
+                                    className={`install-toggle obfuscate-toggle ${obfuscate ? 'active' : ''}`}
+                                    title="Encrypts IoStore with game's AES key to block FModel extraction"
+                                >
+                                    <div className="install-toggle__text">
+                                        <span className="install-toggle__label">Obfuscation</span>
+                                        <span className="install-toggle__hint">
+                                            {obfuscate ? 'IoStore will be AES encrypted' : 'Encrypt to block FModel extraction'}
+                                        </span>
+                                    </div>
+                                </Switch>
+                            </div>
+
                             <div className="options-section">
                                 <label className="checkbox-option">
                                     <input
@@ -96,7 +144,7 @@ export default function UpdateModModal({ isOpen, onClose, onConfirm, oldMod, new
                         <div className="modal-footer">
                             <button className="cancel-btn" onClick={onClose}>Cancel</button>
                             <button
-                                className="confirm-btn primary"
+                                className="btn-install"
                                 onClick={() => onConfirm(preserveName)}
                                 autoFocus
                             >

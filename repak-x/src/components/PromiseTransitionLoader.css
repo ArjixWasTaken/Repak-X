@@ -1,0 +1,100 @@
+.promise-transition-loader {
+  position: fixed;
+  inset: 0;
+  z-index: 4000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-darkest), transparent 52%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.promise-transition-loader__card {
+  pointer-events: none;
+  min-width: 210px;
+  max-width: min(85vw, 320px);
+  padding: 0.8rem 1rem;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent-primary), transparent 58%);
+  background:
+    radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--accent-primary), transparent 88%) 0%, transparent 62%),
+    color-mix(in srgb, var(--panel-bg), black 6%);
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.55),
+    0 0 0 1px color-mix(in srgb, var(--accent-primary), transparent 78%) inset;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.promise-transition-loader__logo-shell {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--bg-dark), transparent 22%);
+  border: 1px solid color-mix(in srgb, var(--accent-primary), transparent 62%);
+  flex-shrink: 0;
+}
+
+.promise-transition-loader__logo {
+  position: relative;
+  z-index: 1;
+}
+
+.promise-transition-loader__logo .modular-logo__r {
+  background-image:
+    linear-gradient(
+      110deg,
+      transparent 0%,
+      transparent 36%,
+      color-mix(in srgb, #ffffff, transparent 18%) 48%,
+      color-mix(in srgb, var(--accent-primary), white 28%) 52%,
+      color-mix(in srgb, #ffffff, transparent 18%) 56%,
+      transparent 68%,
+      transparent 100%
+    ),
+    linear-gradient(var(--accent-primary), var(--accent-primary));
+  background-repeat: no-repeat;
+  background-size: 240% 100%, 100% 100%;
+  background-position: -185% 50%, center;
+  animation: repakx-loader-lightswipe 1.2s linear infinite;
+}
+
+.promise-transition-loader__message {
+  font-size: 0.84rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+  text-shadow: 0 0 16px color-mix(in srgb, var(--accent-primary), transparent 76%);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@keyframes repakx-loader-lightswipe {
+  0% {
+    background-position: -185% 50%, center;
+  }
+  100% {
+    background-position: 220% 50%, center;
+  }
+}
+
+@media (max-width: 768px) {
+  .promise-transition-loader__card {
+    min-width: 180px;
+    padding: 0.72rem 0.85rem;
+    border-radius: 14px;
+  }
+
+  .promise-transition-loader__message {
+    font-size: 0.78rem;
+  }
+}

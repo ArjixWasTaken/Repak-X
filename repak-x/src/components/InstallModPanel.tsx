@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { motion } from 'framer-motion'
 import Switch from './ui/Switch'
 import { FaTag } from "react-icons/fa6"
@@ -223,6 +224,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
   const [modSettings, setModSettings] = useState<Record<number, ModSetting>>(() => buildInitialSettings(mods))
   // Removed global selectedFolderId since we now track it per-mod in modSettings
   const [isCreatingFolder, setIsCreatingFolder] = useState(false)
+  const [obfuscate, setObfuscate] = useState(false)
 
   // Folder tree data
   const rootFolder = useMemo(() => folders.find(f => f.is_root), [folders])
@@ -231,6 +233,10 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
     const root = buildTree(subfolders)
     return convertToArray(root)
   }, [subfolders])
+
+  useEffect(() => {
+    invoke('get_obfuscate').then((val) => setObfuscate(val as boolean)).catch(() => {})
+  }, [])
 
   useEffect(() => {
     console.log('[InstallModPanel] Received mods:', mods.length, mods)
@@ -468,6 +474,29 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                       <div className="install-mod-card__footer">
                         <Switch
                           size="md"
+                          color="primary"
+                          checked={obfuscate}
+                          onChange={async (value) => {
+                            try {
+                              await invoke('set_obfuscate', { enabled: value })
+                              setObfuscate(value)
+                            } catch (e) {
+                              console.error('Failed to set obfuscation:', e)
+                            }
+                          }}
+                          className={`install-toggle obfuscate-toggle ${obfuscate ? 'active' : ''}`}
+                          title="Encrypts IoStore with game's AES key to block FModel extraction"
+                        >
+                          <div className="install-toggle__text">
+                            <span className="install-toggle__label">Obfuscation</span>
+                            <span className="install-toggle__hint">
+                              {obfuscate ? 'IOStore will be AES encrypted' : 'Encrypt mod to block Fmodel extraction'}
+                            </span>
+                          </div>
+                        </Switch>
+
+                        <Switch
+                          size="md"
                           color="warning"
                           checked={mod.contains_uassets === false ? true : (modSettings[idx]?.forceLegacy || false)}
                           onChange={(value) => {
@@ -497,7 +526,7 @@ export default function InstallModPanel({ mods, allTags, folders = [], onCreateT
                             checked={modSettings[idx]?.toRepak || false}
                             onChange={(value) => updateModSetting(idx, 'toRepak', value)}
                             isDisabled={repakLocked}
-                            className={`install-toggle repak-toggle ${repakLocked ? 'locked' : ''}`}
+                            className={`install-toggle repak-toggle ${repakLocked ? 'locked' : ''} ${modSettings[idx]?.toRepak ? 'active' : ''}`}
                             title={repakTitle}
                           >
                             <div className="install-toggle__text">

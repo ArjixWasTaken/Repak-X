@@ -41,6 +41,7 @@ import QuickOrganizeOverlay from './components/QuickOrganizeOverlay'
 import InputPromptModal from './components/InputPromptModal'
 import UpdateModModal from './components/UpdateModModal'
 import UpdateAppModal from './components/UpdateAppModal'
+import PromiseTransitionLoader from './components/PromiseTransitionLoader'
 import { AuroraText } from './components/ui/AuroraText'
 import { AlertProvider, useAlert } from './components/AlertHandler'
 import { useGlobalTooltips } from './hooks/useGlobalTooltips'
@@ -149,6 +150,7 @@ type UpdateModState = {
   isOpen: boolean
   mod: ModRecord | null
   newSourcePath: string | null
+  obfuscatePreference: boolean | null
 }
 
 type CharacterDataEntry = {
@@ -300,8 +302,11 @@ function App() {
   const [updateModState, setUpdateModState] = useState<UpdateModState>({
     isOpen: false,
     mod: null,
-    newSourcePath: null
+    newSourcePath: null,
+    obfuscatePreference: null
   })
+  const [promiseLoaderCount, setPromiseLoaderCount] = useState(0)
+  const [promiseLoaderMessage, setPromiseLoaderMessage] = useState('Working...')
 
   const dropTargetFolderRef = useRef<string | null>(null)
   const searchInputRef = useRef<HTMLInputElement | null>(null)
@@ -309,7 +314,30 @@ function App() {
   const gameRunningRef = useRef(false)
   const lastSelectedModIndex = useRef<number | null>(null) // For Shift+click range selection
   const filteredModsRef = useRef<ModRecord[]>([]) // Keep in sync with filteredMods for selection handler
-  const clashScopeModPath = useRef<string | null>(null) // Track single-mod conflict scope path
+  const clashScopeModPath = useRef<string | null>(null) // null = global clashes, path = single-mod scope
+
+  const showPromiseTransitionLoader = (message: string) => {
+    console.debug('[PromiseTransitionLoader] show', { message })
+    setPromiseLoaderMessage(message)
+    setPromiseLoaderCount(prev => prev + 1)
+  }
+
+  const hidePromiseTransitionLoader = () => {
+    setPromiseLoaderCount(prev => {
+      const next = Math.max(0, prev - 1)
+      console.debug('[PromiseTransitionLoader] hide', { previous: prev, next })
+      return next
+    })
+  }
+
+  const withPromiseTransitionLoader = async <T,>(message: string, work: () => Promise<T>): Promise<T> => {
+    showPromiseTransitionLoader(message)
+    try {
+      return await work()
+    } finally {
+      hidePromiseTransitionLoader()
+    }
+  }
 
   // Bulk delete state
   const [isDeletingBulk, setIsDeletingBulk] = useState(false)
@@ -447,14 +475,19 @@ function App() {
 
   const handleCheckClashes = async () => {
     try {
-      setStatus('Checking for clashes...')
-      clashScopeModPath.current = null
-      const result = await invoke('check_mod_clashes') as any
-      setClashes(result)
-      setPanel('clash', true)
-      setStatus(`Found ${result.length} clashes`)
+      await withPromiseTransitionLoader('Checking conflicts...', async () => {
+        console.debug('[Conflicts] Starting global conflict check')
+        setStatus('Checking for clashes...')
+        clashScopeModPath.current = null
+        const result = await invoke('check_mod_clashes') as any
+        setClashes(result)
+        setPanel('clash', true)
+        setStatus(`Found ${result.length} clashes`)
+        console.debug('[Conflicts] Global conflict check completed', { count: Array.isArray(result) ? result.length : 0 })
+      })
     } catch (error) {
       setStatus('Error checking clashes: ' + error)
+      console.error('[Conflicts] Global conflict check failed:', error)
     }
   }
 
@@ -524,42 +557,49 @@ function App() {
 
   const handleCheckSingleModClashes = async (mod: ModRecord) => {
     try {
-      setStatus(`Checking conflicts for ${mod.customName || mod.mod_name || 'mod'}...`)
-      clashScopeModPath.current = mod.path
-      const conflicts = await invoke('check_single_mod_conflicts', { modPath: mod.path }) as SingleModConflict[]
+      await withPromiseTransitionLoader('Checking conflicts...', async () => {
+        console.debug('[Conflicts] Starting single-mod conflict check', { modPath: mod.path })
+        setStatus(`Checking conflicts for ${mod.customName || mod.mod_name || 'mod'}...`)
+        clashScopeModPath.current = mod.path
+        const conflicts = await invoke('check_single_mod_conflicts', { modPath: mod.path }) as SingleModConflict[]
 
-      // Transform SingleModConflict objects to ModClash format for the ClashPanel
-      // Backend SingleModConflict: { conflicting_mod_path, conflicting_mod_name, overlapping_files, ... }
-      // Frontend ModClash expected: { file_path, mod_paths: [path1, path2] }
+        // Transform SingleModConflict objects to ModClash format for the ClashPanel
+        // Backend SingleModConflict: { conflicting_mod_path, conflicting_mod_name, overlapping_files, ... }
+        // Frontend ModClash expected: { file_path, mod_paths: [path1, path2] }
 
-      const fileMap = new Map<string, Set<string>>() // file_path -> Set(mod_paths)
+        const fileMap = new Map<string, Set<string>>() // file_path -> Set(mod_paths)
 
-      if (conflicts && conflicts.length > 0) {
-        conflicts.forEach((conflict: SingleModConflict) => {
-          conflict.overlapping_files.forEach((file: string) => {
-            if (!fileMap.has(file)) {
-              fileMap.set(file, new Set())
-            }
-            const fileMods = fileMap.get(file)
-            if (!fileMods) return
-            // Add both the checked mod and the conflicting mod
-            fileMods.add(mod.path)
-            fileMods.add(conflict.conflicting_mod_path)
+        if (conflicts && conflicts.length > 0) {
+          conflicts.forEach((conflict: SingleModConflict) => {
+            conflict.overlapping_files.forEach((file: string) => {
+              if (!fileMap.has(file)) {
+                fileMap.set(file, new Set())
+              }
+              const fileMods = fileMap.get(file)
+              if (!fileMods) return
+              // Add both the checked mod and the conflicting mod
+              fileMods.add(mod.path)
+              fileMods.add(conflict.conflicting_mod_path)
+            })
           })
+        }
+
+        const transformedClashes: ClashRecord[] = Array.from(fileMap.entries()).map(([file_path, modPathsSet]) => ({
+          file_path,
+          mod_paths: Array.from(modPathsSet)
+        }))
+
+        setClashes(transformedClashes)
+        setPanel('clash', true)
+        setStatus(`Found ${transformedClashes.length} conflicts for this mod`)
+        console.debug('[Conflicts] Single-mod conflict check completed', {
+          modPath: mod.path,
+          count: transformedClashes.length
         })
-      }
-
-      const transformedClashes: ClashRecord[] = Array.from(fileMap.entries()).map(([file_path, modPathsSet]) => ({
-        file_path,
-        mod_paths: Array.from(modPathsSet)
-      }))
-
-      setClashes(transformedClashes)
-      setPanel('clash', true)
-      setStatus(`Found ${transformedClashes.length} conflicts for this mod`)
+      })
     } catch (error) {
       setStatus('Error checking mod conflicts: ' + error)
-      console.error(error)
+      console.error('[Conflicts] Single-mod conflict check failed:', error)
     }
   }
 
@@ -726,6 +766,7 @@ function App() {
     if (!mod) return
 
     try {
+      console.debug('[UpdateMod] Opening source picker', { modPath: mod.path })
       const selected = await open({
         multiple: false,
         filters: [{
@@ -735,11 +776,20 @@ function App() {
       })
 
       if (selected) {
+        const obfuscatePreference = await withPromiseTransitionLoader('Preparing update...', async () => {
+          console.debug('[UpdateMod] File selected, fetching update preparation data', { selectedPath: selected })
+          const pref = await invoke('get_obfuscate') as boolean
+          console.debug('[UpdateMod] Retrieved obfuscate preference', { value: pref })
+          return pref
+        })
+
         setUpdateModState({
           isOpen: true,
           mod: mod,
-          newSourcePath: selected
+          newSourcePath: selected,
+          obfuscatePreference
         })
+        console.debug('[UpdateMod] Update modal opened', { modPath: mod.path, selectedPath: selected })
       }
     } catch (e) {
       console.error('Failed to select update file:', e)
@@ -779,7 +829,7 @@ function App() {
         }
       }
 
-      alert.success('Mod Updated', 'Successfully replaced the mod.')
+      console.debug('[UpdateMod] Completed update flow; relying on backend named success toast')
 
     } catch (e) {
       console.error('Update failed:', e)
@@ -2528,6 +2578,12 @@ function App() {
         onConfirm={handleConfirmUpdate}
         oldMod={updateModState.mod}
         newSourcePath={updateModState.newSourcePath}
+        initialObfuscate={updateModState.obfuscatePreference}
+      />
+
+      <PromiseTransitionLoader
+        isVisible={promiseLoaderCount > 0}
+        message={promiseLoaderMessage}
       />
 
       <UpdateAppModal
