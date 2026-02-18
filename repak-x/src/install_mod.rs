@@ -52,6 +52,9 @@ pub struct InstallableMod {
     /// Enable parallel processing for batch operations (texture stripping, etc.)
     #[serde(default)]
     pub parallel_processing: bool,
+    /// Enable obfuscation (encrypts IoStore with game's AES key to block extraction tools like FModel)
+    #[serde(default)]
+    pub obfuscate: bool,
 }
 
 impl Default for InstallableMod {
@@ -80,6 +83,7 @@ impl Default for InstallableMod {
             force_legacy_pak: false,
             install_subfolder: String::new(),
             parallel_processing: false,
+            obfuscate: false,
         }
     }
 }

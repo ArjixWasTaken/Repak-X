@@ -46,8 +46,9 @@ function Get-Version {
     return "0.0.0"
 }
 
-# Get workspace root
-$workspaceRoot = Split-Path -Parent $PSCommandPath
+# Get workspace root (scripts are in scripts/Repak-X_scripts/, so go up 2 levels)
+$scriptDir = Split-Path -Parent $PSCommandPath
+$workspaceRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Push-Location $workspaceRoot
 
 try {
@@ -62,7 +63,7 @@ try {
     Write-Step "[1/2] Building Project"
     Write-Info "Running full contributor build..."
     
-    $buildScript = Join-Path $workspaceRoot "build_contributor.ps1"
+    $buildScript = Join-Path $scriptDir "build_contributor.ps1"
     & $buildScript -Configuration $Configuration
     
     if ($LASTEXITCODE -ne 0) {

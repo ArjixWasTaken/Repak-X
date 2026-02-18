@@ -78,6 +78,9 @@ struct AppState {
     /// Enable parallel processing for batch operations
     #[serde(default)]
     parallel_processing: bool,
+    /// Enable obfuscation (encrypts IoStore with game's AES key to block FModel extraction)
+    #[serde(default)]
+    obfuscate: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -223,6 +226,26 @@ async fn set_parallel_processing(
 async fn get_parallel_processing(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
     let state = state.lock().unwrap();
     Ok(state.parallel_processing)
+}
+
+/// Set obfuscation mode (encrypts IoStore with game's AES key to block FModel extraction)
+#[tauri::command]
+async fn set_obfuscate(
+    enabled: bool,
+    state: State<'_, Arc<Mutex<AppState>>>,
+) -> Result<(), String> {
+    info!("set_obfuscate called: enabled={}", enabled);
+    let mut state = state.lock().unwrap();
+    state.obfuscate = enabled;
+    save_state(&state).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Get current obfuscation setting
+#[tauri::command]
+async fn get_obfuscate(state: State<'_, Arc<Mutex<AppState>>>) -> Result<bool, String> {
+    let state = state.lock().unwrap();
+    Ok(state.obfuscate)
 }
 
 #[tauri::command]
@@ -1573,6 +1596,7 @@ async fn install_mods(
     let mod_directory = state_guard.game_path.clone();
     let usmap_filename = state_guard.usmap_path.clone();
     let parallel_processing = state_guard.parallel_processing;
+    let obfuscate = state_guard.obfuscate;
     drop(state_guard);
 
     // Propagate USMAP path to UAssetTool via environment for UAssetAPI-based processing (from roaming folder)
@@ -1642,6 +1666,8 @@ async fn install_mods(
             installable.usmap_path = usmap_filename.clone();
             // Apply parallel processing setting from app state
             installable.parallel_processing = parallel_processing;
+            // Apply obfuscation setting from app state
+            installable.obfuscate = obfuscate;
         }
     }
 
@@ -1995,6 +2021,7 @@ async fn update_mod(
     let state_guard = state.lock().unwrap();
     let mod_directory = state_guard.game_path.clone();
     let usmap_filename = state_guard.usmap_path.clone();
+    let obfuscate = state_guard.obfuscate;
     drop(state_guard);
     
     // Set USMAP path
@@ -2018,6 +2045,7 @@ async fn update_mod(
         installable.mod_name = mod_name.clone();
         installable.install_subfolder = install_subfolder.clone();
         installable.usmap_path = usmap_filename;
+        installable.obfuscate = obfuscate;
     }
     
     // Install synchronously for update operation (we need to know the result)
@@ -5903,7 +5931,10 @@ fn main() {
             save_drp_settings,
             // Parallel processing
             set_parallel_processing,
-            get_parallel_processing
+            get_parallel_processing,
+            // Obfuscation
+            set_obfuscate,
+            get_obfuscate
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")

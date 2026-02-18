@@ -7,15 +7,20 @@ Write-Host "Building Repak Gui Revamped" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
+# Get workspace root (scripts are in scripts/Repak-X_scripts/, so go up 2 levels)
+$scriptDir = $PSScriptRoot
+$workspaceRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+Set-Location $workspaceRoot
+
 # Ensure UAssetToolRivals submodule is initialized (needed for build.rs)
-$initScript = Join-Path $PSScriptRoot "scripts\Init-Submodule.ps1"
+$initScript = Join-Path $workspaceRoot "scripts\Init-Submodule.ps1"
 if (Test-Path $initScript) {
     & $initScript -NonInteractive
 }
 
 # Build Tauri app (includes frontend build via beforeBuildCommand)
 Write-Host "Building Tauri application (frontend + backend)..." -ForegroundColor Yellow
-Set-Location repak-gui
+Set-Location (Join-Path $workspaceRoot "repak-x")
 npx tauri build --no-bundle
 if ($LASTEXITCODE -ne 0) {
     Write-Host "Tauri build failed!" -ForegroundColor Red

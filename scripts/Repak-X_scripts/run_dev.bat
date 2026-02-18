@@ -3,8 +3,9 @@ echo ==========================================
 echo Starting Repak GUI Revamped (Dev Mode)
 echo ==========================================
 
-cd repak-gui || (
-    echo Error: Could not find repak-gui directory
+REM Scripts are in scripts\Repak-X_scripts\, go up 2 levels then into repak-x
+cd /d "%~dp0..\..\repak-x" || (
+    echo Error: Could not find repak-x directory
     pause
     exit /b 1
 )

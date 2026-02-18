@@ -14,8 +14,9 @@ function Invoke-CargoBuild {
 }
 
 function Get-WorkspaceRoot {
-    # This script is expected to live at repo root: Repak_Gui-Revamped/
-    return (Split-Path -Parent $PSCommandPath)
+    # Scripts are in scripts/Repak-X_scripts/, so go up 2 levels to repo root
+    $scriptDir = Split-Path -Parent $PSCommandPath
+    return Split-Path -Parent (Split-Path -Parent $scriptDir)
 }
 
 function Get-Version {
@@ -39,26 +40,26 @@ Invoke-CargoBuild -Config $Configuration
 Pop-Location
 
 # Verify outputs
-if (!(Test-Path $exePath)) { throw "repak-gui.exe not found at $exePath" }
+if (!(Test-Path $exePath)) { throw "REPAK-X.exe not found at $exePath" }
 if (!(Test-Path $bridgeExe)) {
     Write-Warning "UAssetBridge.exe not found at $bridgeExe. Texture pipeline will be disabled."
 }
 
 # Determine app version from workspace Cargo.toml (or fallback to repak-gui/Cargo.toml)
 $cargoRoot = Join-Path $root "Cargo.toml"
-$cargoGui = Join-Path $root "repak-gui\Cargo.toml"
+$cargoGui = Join-Path $root "repak-x\Cargo.toml"
 $version = if (Test-Path $cargoRoot) { Get-Version -CargoTomlPath $cargoRoot } elseif (Test-Path $cargoGui) { Get-Version -CargoTomlPath $cargoGui } else { "0.0.0" }
 
 # Create dist folder
 $distRoot = Join-Path $root "dist"
-$appFolderName = "Repak-Gui-Revamped-v$version"
+$appFolderName = "Repak-X-v$version"
 $distDir = Join-Path $distRoot $appFolderName
 
 Write-Host "Creating dist at $distDir"
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
 # Copy main binary
-Copy-Item -LiteralPath $exePath -Destination (Join-Path $distDir "repak-gui.exe") -Force
+Copy-Item -LiteralPath $exePath -Destination (Join-Path $distDir "REPAK-X.exe") -Force
 
 # Copy uassetbridge directory if present
 if (Test-Path $bridgeDir) {
@@ -120,8 +121,8 @@ foreach ($doc in $docs) {
 
 # Copy fonts/palettes if present for custom UI features
 $maybeDirs = @(
-    (Join-Path $root "repak-gui\fonts"),
-    (Join-Path $root "repak-gui\palettes")
+    (Join-Path $root "repak-x\fonts"),
+    (Join-Path $root "repak-x\palettes")
 )
 foreach ($d in $maybeDirs) {
     if (Test-Path $d) {

@@ -48,8 +48,9 @@ function Kill-Process-Safe {
     }
 }
 
-# Get workspace root
-$workspaceRoot = Split-Path -Parent $PSCommandPath
+# Get workspace root (scripts are in scripts/Repak-X_scripts/, so go up 2 levels)
+$scriptDir = Split-Path -Parent $PSCommandPath
+$workspaceRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
 Push-Location $workspaceRoot
 
 try {

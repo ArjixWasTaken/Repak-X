@@ -4,6 +4,11 @@ param (
 
 Write-Host "=== Backend Push Helper ===" -ForegroundColor Cyan
 
+# Change to repo root (scripts are in scripts/Repak-X_scripts/, so go up 2 levels)
+$scriptDir = $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+Set-Location $repoRoot
+
 # 1. Add Rust Source Files (Recursive)
 Write-Host "Staging Rust files (*.rs, Cargo.toml, Cargo.lock)..."
 git add "**/*.rs"

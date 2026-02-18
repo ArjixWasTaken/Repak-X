@@ -1,13 +1,14 @@
 # Quick run script for Repak Gui Revamped
 # Just launches the built executable
 
+# Scripts are in scripts/Repak-X_scripts/, so go up 2 levels to repo root
 $scriptRoot = Split-Path -Parent $PSCommandPath
-$workspaceRoot = $scriptRoot
+$workspaceRoot = Split-Path -Parent (Split-Path -Parent $scriptRoot)
 
 $targetExe = @(
     "target\release\REPAK-X.exe",
-    "repak-gui\target\release\repak-gui.exe",
-    "target\debug\repak-gui.exe"
+    "repak-x\target\release\REPAK-X.exe",
+    "target\debug\REPAK-X.exe"
 )
 
 $exePath = $null
@@ -21,7 +22,7 @@ foreach ($rel in $targetExe) {
 
 if ($exePath) {
     # Kill existing instances to ensure clean startup
-    Stop-Process -Name "repak-gui" -Force -ErrorAction SilentlyContinue
+    Stop-Process -Name "REPAK-X" -Force -ErrorAction SilentlyContinue
     
     Write-Host "Launching Repak Gui Revamped..." -ForegroundColor Green
     Start-Process -FilePath $exePath

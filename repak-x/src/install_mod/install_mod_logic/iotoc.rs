@@ -247,6 +247,7 @@ pub fn convert_to_iostore_directory(
         Some(true), // Enable compression
         None, // Use default AES key
         pak.parallel_processing, // Toggle: false=50%, true=75% CPU threads
+        pak.obfuscate, // Encrypt with game's AES key to block FModel extraction
     ).map_err(|e| repak::Error::Io(std::io::Error::new(
         std::io::ErrorKind::Other,
         format!("IoStore conversion failed: {}", e),

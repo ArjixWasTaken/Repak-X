@@ -349,7 +349,7 @@ impl SyncToolkit {
         Ok(IoStoreListResult { package_count, container_name, files })
     }
     
-    pub fn create_mod_iostore(&self, output_path: &str, input_dir: &str, usmap_path: Option<&str>, mount_point: Option<&str>, compress: Option<bool>, aes_key: Option<&str>, parallel: bool) -> Result<IoStoreResult> {
+    pub fn create_mod_iostore(&self, output_path: &str, input_dir: &str, usmap_path: Option<&str>, mount_point: Option<&str>, compress: Option<bool>, aes_key: Option<&str>, parallel: bool, obfuscate: bool) -> Result<IoStoreResult> {
         let request = UAssetRequest::CreateModIoStore {
             output_path: output_path.to_string(),
             input_dir: input_dir.to_string(),
@@ -358,6 +358,7 @@ impl SyncToolkit {
             compress,
             aes_key: aes_key.map(|s| s.to_string()),
             parallel,
+            obfuscate,
         };
         
         let response = self.send_request(&request)?;
@@ -474,7 +475,7 @@ pub enum UAssetRequest {
     #[serde(rename = "extract_script_objects")]
     ExtractScriptObjects { file_path: String, output_path: String },
     #[serde(rename = "create_mod_iostore")]
-    CreateModIoStore { output_path: String, input_dir: String, usmap_path: Option<String>, mount_point: Option<String>, compress: Option<bool>, aes_key: Option<String>, #[serde(default)] parallel: bool },
+    CreateModIoStore { output_path: String, input_dir: String, usmap_path: Option<String>, mount_point: Option<String>, compress: Option<bool>, aes_key: Option<String>, #[serde(default)] parallel: bool, #[serde(default)] obfuscate: bool },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -620,9 +621,10 @@ pub fn create_mod_iostore(
     compress: Option<bool>,
     aes_key: Option<&str>,
     parallel: bool,
+    obfuscate: bool,
 ) -> Result<IoStoreResult> {
     let toolkit = get_global_toolkit()?;
-    toolkit.create_mod_iostore(output_path, input_dir, usmap_path, mount_point, compress, aes_key, parallel)
+    toolkit.create_mod_iostore(output_path, input_dir, usmap_path, mount_point, compress, aes_key, parallel, obfuscate)
 }
 
 /// Patch mesh materials

@@ -7,8 +7,10 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Change to repo root
-Set-Location $PSScriptRoot
+# Change to repo root (scripts are in scripts/Repak-X_scripts/, so go up 2 levels)
+$scriptDir = $PSScriptRoot
+$repoRoot = Split-Path -Parent (Split-Path -Parent $scriptDir)
+Set-Location $repoRoot
 
 Write-Host "`n=== Frontend UI Push Script ===" -ForegroundColor Cyan
 
@@ -86,12 +88,12 @@ if (-not $Message) {
 
 # Stage frontend files
 Write-Host "`nStaging frontend changes..." -ForegroundColor Cyan
-git add "repak-gui/src/**"
-git add "repak-gui/package.json"
-git add "repak-gui/package-lock.json"
-git add "repak-gui/*.js"
-git add "repak-gui/*.json"
-git add "repak-gui/*.html"
+git add "repak-x/src/**"
+git add "repak-x/package.json"
+git add "repak-x/package-lock.json"
+git add "repak-x/*.js"
+git add "repak-x/*.json"
+git add "repak-x/*.html"
 
 # Check if there are staged changes
 $staged = git diff --cached --name-status
