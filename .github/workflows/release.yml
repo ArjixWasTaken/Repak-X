@@ -6,9 +6,9 @@ concurrency:
 on:
   push:
     branches:
-      - main  # Triggers on push to main branch
+      - main # Triggers on push to main branch
     # The job will only run if the commit message contains the keyword '[run-ci]'
-  workflow_dispatch:  # Allows manual trigger from GitHub Actions tab
+  workflow_dispatch: # Allows manual trigger from GitHub Actions tab
 
 env:
   CARGO_TERM_COLOR: always
@@ -21,34 +21,23 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && contains(github.event.head_commit.message, '[run-ci]'))
-    
+
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            dotnet_rid: win-x64
-            artifact_name: Repak-X-Windows
-            artifact_ext: .zip
-            sccache_path: C:\Users\runneradmin\.cache\sccache
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             dotnet_rid: linux-x64
             artifact_name: Repak-X-Linux
             artifact_ext: .tar.gz
             sccache_path: ~/.cache/sccache
-    
+
     runs-on: ${{ matrix.os }}
-    
+
     outputs:
       version: ${{ steps.version.outputs.VERSION }}
-    
-    env:
-      RUSTC_WRAPPER: sccache
-      SCCACHE_DIR: ${{ matrix.sccache_path }}
-      SCCACHE_IDLE_TIMEOUT: 0
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
@@ -81,12 +70,12 @@ jobs:
       - name: Setup .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: "8.0.x"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       # ========== Caching ==========
       - name: Cache Node.js modules
@@ -122,23 +111,6 @@ jobs:
             ${{ runner.os }}-cargo-target-${{ hashFiles('**/Cargo.lock', 'Cargo.toml', 'repak-x/tauri.conf.json', 'repak-x/package.json') }}-
             ${{ runner.os }}-cargo-target-
 
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@v0.0.4
-
-      - name: Cache sccache
-        uses: actions/cache@v4
-        with:
-          path: ${{ matrix.sccache_path }}
-          key: ${{ runner.os }}-sccache-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-sccache-
-
-      - name: Start sccache server
-        shell: bash
-        run: |
-          sccache --start-server
-          sccache --show-stats
-
       # ========== Read Version ==========
       - name: Read Version
         id: version
@@ -169,39 +141,6 @@ jobs:
         run: |
           cargo build --release --target ${{ matrix.target }}
 
-      # ========== Package - Windows ==========
-      - name: Package Windows Distribution
-        if: runner.os == 'Windows'
-        id: package_windows
-        shell: pwsh
-        run: |
-          $version = "${{ steps.version.outputs.VERSION }}"
-          $distDir = "dist"
-          $packageDir = "$distDir/Repak-X-v$version-Windows"
-          
-          # Create directories
-          New-Item -ItemType Directory -Force -Path $packageDir
-          New-Item -ItemType Directory -Force -Path "$packageDir/uassettool"
-          New-Item -ItemType Directory -Force -Path "$packageDir/data"
-          
-          # Copy main executable
-          Copy-Item "target/${{ matrix.target }}/release/REPAK-X.exe" "$packageDir/"
-          
-          # Copy UAssetTool and dependencies
-          Copy-Item "target/uassettool/*" "$packageDir/uassettool/" -Recurse
-          
-          # Copy data files
-          Copy-Item "repak-x/src/data/character_data.json" "$packageDir/data/"
-          
-          # Create ZIP
-          $zipPath = "$distDir/Repak-X-v$version-Windows.zip"
-          Compress-Archive -Path "$packageDir/*" -DestinationPath $zipPath -Force
-          
-          $zipSize = [math]::Round((Get-Item $zipPath).Length / 1MB, 2)
-          Write-Host "Windows ZIP created: $zipSize MB"
-          
-          echo "ARTIFACT_PATH=$zipPath" >> $env:GITHUB_OUTPUT
-
       # ========== Package - Linux ==========
       - name: Package Linux Distribution
         if: runner.os == 'Linux'
@@ -211,29 +150,29 @@ jobs:
           VERSION="${{ steps.version.outputs.VERSION }}"
           DIST_DIR="dist"
           PACKAGE_DIR="$DIST_DIR/Repak-X-v$VERSION-Linux"
-          
+
           # Create directories
           mkdir -p "$PACKAGE_DIR/uassettool"
           mkdir -p "$PACKAGE_DIR/data"
-          
+
           # Copy main executable
           cp "target/${{ matrix.target }}/release/REPAK-X" "$PACKAGE_DIR/"
           chmod +x "$PACKAGE_DIR/REPAK-X"
-          
+
           # Copy UAssetTool and dependencies
           cp -r target/uassettool/* "$PACKAGE_DIR/uassettool/"
           chmod +x "$PACKAGE_DIR/uassettool/UAssetTool" 2>/dev/null || true
-          
+
           # Copy data files
           cp "repak-x/src/data/character_data.json" "$PACKAGE_DIR/data/"
-          
+
           # Create tarball
           TARBALL_PATH="$DIST_DIR/Repak-X-v$VERSION-Linux.tar.gz"
           tar -czvf "$TARBALL_PATH" -C "$DIST_DIR" "Repak-X-v$VERSION-Linux"
-          
+
           TARBALL_SIZE=$(du -h "$TARBALL_PATH" | cut -f1)
           echo "Linux tarball created: $TARBALL_SIZE"
-          
+
           echo "ARTIFACT_PATH=$TARBALL_PATH" >> $GITHUB_OUTPUT
 
       # ========== Upload Artifacts ==========
@@ -241,15 +180,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}-v${{ steps.version.outputs.VERSION }}
-          path: ${{ runner.os == 'Windows' && steps.package_windows.outputs.ARTIFACT_PATH || steps.package_linux.outputs.ARTIFACT_PATH }}
+          path: ${{ steps.package_linux.outputs.ARTIFACT_PATH }}
           retention-days: 30
-
-      - name: Stop sccache and show stats
-        if: always()
-        shell: bash
-        run: |
-          sccache --show-stats || true
-          sccache --stop-server || true
 
   # ============================================================================
   # RELEASE JOB - Creates GitHub release with all artifacts
@@ -257,19 +189,13 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: Repak-X-Windows-v${{ needs.build.outputs.version }}
-          path: dist/
 
       - name: Download Linux Artifact
         uses: actions/download-artifact@v4
@@ -285,10 +211,10 @@ jobs:
       - name: Create and Push Tag
         run: |
           VERSION="${{ needs.build.outputs.version }}"
-          
+
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           # Check if tag already exists
           if git rev-parse "v$VERSION" >/dev/null 2>&1; then
             echo "Tag v$VERSION already exists, skipping tag creation"
@@ -307,37 +233,15 @@ jobs:
           generate_release_notes: false
           body: |
             ## Downloads
-            
-            - **Windows**: `Repak-X-v${{ needs.build.outputs.version }}-Windows.zip`
+
             - **Linux**: `Repak-X-v${{ needs.build.outputs.version }}-Linux.tar.gz`
-            
+
             ### Linux Requirements
             Make sure you have the following packages installed:
             ```bash
             sudo apt install libwebkit2gtk-4.1-0 libgtk-3-0 libayatana-appindicator3-1 unzip
             ```
           files: |
-            dist/Repak-X-v${{ needs.build.outputs.version }}-Windows.zip
             dist/Repak-X-v${{ needs.build.outputs.version }}-Linux.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Notify Discord
-        if: success()
-        env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: |
-          VERSION="${{ needs.build.outputs.version }}"
-          
-          if [ -z "$DISCORD_WEBHOOK" ]; then
-            echo "Discord webhook not configured, skipping notification"
-            exit 0
-          fi
-          
-          echo "Sending Discord notification..."
-          
-          curl -H "Content-Type: application/json" \
-            -d "{\"content\": \"<@&1472639362557542510> <:RepakXApp:1448417099318956133> **Repak X v$VERSION** is now available for Windows and Linux!\nhttps://github.com/XzantGaming/Repak-X/releases/latest\"}" \
-            "$DISCORD_WEBHOOK"
-          
-          echo "Discord notification sent!"
